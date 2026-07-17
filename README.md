@@ -9,8 +9,13 @@ from the Devin session currently open at
 
 The extension runs in the logged-in `app.devin.ai` tab and calls Devin's
 same-origin session and events endpoints using the browser's existing session
-token. It does not embed a Devin API key or service-user token. Only the
-currently opened session is exported.
+token. It does not embed a Devin API key or service-user token.
+
+The extension also injects an in-page toolbar on Devin pages. It survives
+single-page navigation and provides **导出 Handoff**, **一键续接**, and an
+editable continuation-template settings panel. Handoff text is saved in
+`chrome.storage.local`, so it remains available when the user switches Devin
+accounts in the same browser.
 
 ### Load unpacked in Chrome or Edge
 
@@ -40,6 +45,18 @@ thoughts** when those conversation events should be included. Worklog and
 Changes are optional sections in the popup. Changes reflect local-repository
 edits and may be empty for sessions that only used remote SSH work.
 
+### Cross-account continuation
+
+1. Open the source Devin session and click **导出 Handoff** in the in-page
+   toolbar. A Markdown download is offered and the handoff is stored locally.
+2. Switch to the other Devin account in the same browser.
+3. Open a new session or the session composer and click **一键续接**.
+4. Review the inserted prompt and send it manually.
+
+The default template contains the cluster-access instructions and a
+`{{HANDOFF}}` placeholder. The settings control lets you edit or restore that
+template. The extension never auto-sends the injected prompt.
+
 ## 简体中文
 
 这是一个简单的 Manifest V3 浏览器扩展，用于导出当前打开的
@@ -48,6 +65,11 @@ edits and may be empty for sessions that only used remote SSH work.
 扩展在已经登录的 `app.devin.ai` 页面中调用 Devin 的同源会话和事件接口，
 使用浏览器已有的登录令牌，不嵌入 Devin API 密钥或服务用户令牌。
 扩展只导出当前打开的会话。
+
+扩展还会在 Devin 页面中注入一个可随 SPA 页面导航保留的页面内工具栏，
+提供 **导出 Handoff**、**一键续接** 和可编辑的续接模板设置。
+Handoff 文本会保存到 `chrome.storage.local`，因此在同一浏览器切换 Devin
+账号后仍然可以使用。
 
 ### 在 Chrome 或 Edge 中加载
 
@@ -74,3 +96,14 @@ Firefox 可以通过 `about:debugging` → **此 Firefox** → **临时载入附
 如果需要在对话中导出这些内容，可以勾选 **Include Devin's thoughts**。
 Worklog 和 Changes 可以在弹窗中单独选择。Changes 反映本地仓库编辑；
 如果会话只使用了远程 SSH，Changes 可能为空。
+
+### 跨账号续接
+
+1. 打开源 Devin 会话，点击页面内工具栏的 **导出 Handoff**。扩展会提供
+   Markdown 下载，并在本地保存 Handoff。
+2. 在同一浏览器中切换到另一个 Devin 账号。
+3. 打开新会话或会话输入框，点击 **一键续接**。
+4. 检查自动填入的提示词，然后手动发送。
+
+默认模板包含集群接入说明和 `{{HANDOFF}}` 占位符。可以通过设置按钮编辑
+或恢复默认模板。扩展不会自动发送填入的提示词。
