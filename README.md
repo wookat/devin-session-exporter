@@ -24,6 +24,29 @@ currently opened session is exported.
 Firefox can load the extension from `about:debugging` → **This Firefox** →
 **Load Temporary Add-on**, subject to Firefox's Manifest V3 compatibility.
 
+### One-click install for all Chrome profiles (Windows)
+
+Instead of loading it unpacked in every profile, `install/install-windows.ps1`
+installs the extension for **all Chrome profiles on the machine** via Chrome's
+enterprise policy (self-hosted, force-installed) and Chrome then **auto-updates**
+it from the GitHub release — no manual reinstall on new versions.
+
+1. Download `install/install-windows.ps1` from this repo.
+2. Right-click it → **Run with PowerShell** (it self-elevates to administrator),
+   or run `powershell -ExecutionPolicy Bypass -File .\install-windows.ps1`.
+3. Fully restart Chrome (close all windows). The extension appears in every
+   profile, fixed extension ID `mdahidnfandbmeaoegfkiajhjaoehldl`.
+
+To remove it, run `install/uninstall-windows.ps1` and restart Chrome.
+
+**How updates work.** Pushing a commit to `main` with a bumped `version` in
+`manifest.json` triggers `.github/workflows/release-extension.yml`, which packs a
+signed CRX (using the `EXTENSION_CRX_KEY` repo secret) and publishes it plus an
+`updates.xml` as a GitHub release `ext-v<version>`. The installed policy points at
+`releases/latest/download/updates.xml`, so every machine picks up the new version
+automatically in the background. Bump the manifest version on each functional
+change, otherwise the release tag is reused and clients keep the old build.
+
 ### Export sections and formats
 
 - **Conversation**: user and Devin messages.
@@ -147,6 +170,26 @@ The AI-oriented Handoff is optimized for a receiving session, not for humans:
 
 Firefox 可以通过 `about:debugging` → **此 Firefox** → **临时载入附加组件**
 加载，但具体支持情况取决于 Firefox 对 Manifest V3 的兼容性。
+
+### 一键安装到所有 Chrome 配置文件（Windows）
+
+不用在每个 profile 里手动「加载已解压」，`install/install-windows.ps1` 会用
+Chrome 企业策略（自托管、强制安装）把插件装到**本机所有 Chrome 配置文件**，
+之后 Chrome 会从 GitHub Release **自动更新**，发新版无需手动重装。
+
+1. 从仓库下载 `install/install-windows.ps1`。
+2. 右键 → **使用 PowerShell 运行**（脚本会自动请求管理员权限），或执行
+   `powershell -ExecutionPolicy Bypass -File .\install-windows.ps1`。
+3. 完全重启 Chrome（关闭所有窗口）。插件会出现在每个 profile 里，固定扩展 ID
+   `mdahidnfandbmeaoegfkiajhjaoehldl`。
+
+卸载：运行 `install/uninstall-windows.ps1` 后重启 Chrome。
+
+**更新机制**：向 `main` 推送并把 `manifest.json` 里的 `version` 提升，会触发
+`.github/workflows/release-extension.yml`，用仓库密钥 `EXTENSION_CRX_KEY` 打包
+签名 CRX，并把它和 `updates.xml` 一起发布为 Release `ext-v<version>`。已安装的
+策略指向 `releases/latest/download/updates.xml`，所有机器后台自动升级。**每次功能
+改动都要提升 manifest 版本号**，否则会复用旧 tag，客户端拿不到新版本。
 
 ### 导出内容和格式
 
