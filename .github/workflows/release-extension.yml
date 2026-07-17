@@ -61,6 +61,7 @@ jobs:
             --appVersion "${{ steps.v.outputs.version }}" \
             --crxURL "https://github.com/${{ github.repository }}/releases/latest/download/devin-session-exporter.crx"
           rm -f key.pem
+          ( cd build/src && zip -r ../../devin-session-exporter.zip . )
 
       - name: Create release
         if: steps.check.outputs.exists == 'false'
@@ -68,6 +69,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create "ext-v${{ steps.v.outputs.version }}" \
-            devin-session-exporter.crx updates.xml \
+            devin-session-exporter.crx updates.xml devin-session-exporter.zip \
             --title "Extension v${{ steps.v.outputs.version }}" \
-            --notes "Auto-built CRX for one-click Chrome policy install/update."
+            --notes "Auto-built CRX (policy install) + unpacked zip (load-unpacked install)."
