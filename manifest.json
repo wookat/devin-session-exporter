@@ -20,15 +20,18 @@
   "permissions": [
     "activeTab",
     "scripting",
-    "downloads"
+    "downloads",
+    "storage"
   ],
   "host_permissions": [
-    "https://app.devin.ai/*"
+    "https://app.devin.ai/*",
+    "https://devin.ai/*"
   ],
   "content_scripts": [
     {
       "matches": [
-        "https://app.devin.ai/sessions/*"
+        "https://app.devin.ai/*",
+        "https://devin.ai/*"
       ],
       "js": [
         "content.js"

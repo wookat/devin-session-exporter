@@ -40,6 +40,37 @@ thoughts** when those conversation events should be included. Worklog and
 Changes are optional sections in the popup. Changes reflect local-repository
 edits and may be empty for sessions that only used remote SSH work.
 
+### Automatic account rotation
+
+The in-page toolbar also supports manual **换到下一个号** and optional
+automatic rotation when a genuine usage-quota or credit-exhaustion message is
+visible. Configure the ordered account list, enable **启用自动换号**, and
+choose whether to **自动发送续接**. The flow exports the current Handoff,
+logs out through the account menu, signs into the next configured
+email/password account, creates a new session, and fills or sends the
+continuation prompt.
+
+Account passwords are stored locally by the extension when account rotation is
+configured. This feature can expose credentials to local browser storage and
+may violate Devin's terms or result in account bans; use it only for accounts
+you control. It supports email/password accounts without 2FA. The optional
+master-password setting encrypts the account list with Web Crypto and caches
+the passphrase only for the current browser session.
+
+The in-page toolbar displays the current account's on-demand remaining balance
+and per-message usage limit when Devin's billing API is available. The account
+settings include a configurable **Message usage limit** target, defaulting to
+200 dollars. The target is applied automatically after each account switch and
+can also be applied manually to the current account. This calls Devin's own
+billing settings endpoint; failures do not stop the continuation flow.
+
+The toolbar balance refreshes every 30 seconds. The settings panel supports
+batch account entry, one account per line in the form
+`email---password---ignored optional fields`; three or more dashes are accepted
+as the delimiter. Each saved account also has a **查余额** action, and
+**刷新全部余额** checks all configured password accounts sequentially without
+switching the current Devin login.
+
 ## 简体中文
 
 这是一个简单的 Manifest V3 浏览器扩展，用于导出当前打开的
@@ -74,3 +105,26 @@ Firefox 可以通过 `about:debugging` → **此 Firefox** → **临时载入附
 如果需要在对话中导出这些内容，可以勾选 **Include Devin's thoughts**。
 Worklog 和 Changes 可以在弹窗中单独选择。Changes 反映本地仓库编辑；
 如果会话只使用了远程 SSH，Changes 可能为空。
+
+### 自动换号
+
+页面内工具栏还支持手动 **换到下一个号**，以及在检测到真实用量配额或
+免费额度耗尽提示时启用自动换号。请在设置中维护有顺序的账号列表，开启
+**启用自动换号**，并选择是否**自动发送续接**。流程会导出当前 Handoff，
+通过账号菜单退出，登录下一个配置的邮箱密码账号，创建新会话，然后填入或
+发送续接提示。
+
+配置自动换号后，账号密码会保存在扩展的本地存储中。这可能带来本地凭据
+暴露风险，也可能违反 Devin 服务条款或导致账号封禁；只应对自己控制的账号
+使用。当前支持无 2FA 的邮箱密码账号。可选的主密码设置使用 Web Crypto
+加密账号列表，并且只在当前浏览器会话中缓存密码短语。
+
+页面内工具栏会在 Devin 计费接口可用时显示当前账号的按需剩余额度和单条
+消息用量上限。设置中的**每个账号消息用量上限**默认为 200 美元，可配置；
+每次自动换号登录后会自动应用，也可以点击按钮手动应用到当前账号。该功能
+调用 Devin 自己的计费设置接口；如果失败，不会中断续接流程。
+
+工具栏余额每 30 秒刷新一次。设置面板支持批量添加账号，每行格式为
+`邮箱---密码---可忽略的额外字段`，分隔符支持三个或更多短横线。每个账号
+还有**查余额**按钮，**刷新全部余额**会按顺序查询所有已配置的邮箱密码账号，
+不会切换当前 Devin 登录账号。
