@@ -1,6 +1,9 @@
 const browserApi = globalThis.browser ?? globalThis.chrome;
 
 const formatSelect = document.getElementById("format");
+const includeConversationCheckbox = document.getElementById("include-conversation");
+const includeWorklogCheckbox = document.getElementById("include-worklog");
+const includeChangesCheckbox = document.getElementById("include-changes");
 const includeThoughtsCheckbox = document.getElementById("include-thoughts");
 const exportButton = document.getElementById("export");
 const status = document.getElementById("status");
@@ -68,6 +71,9 @@ async function extractFromTab(tab) {
     return await extensionCall(browserApi.tabs.sendMessage.bind(browserApi.tabs), tab.id, {
       type: "extractConversation",
       options: {
+        includeConversation: includeConversationCheckbox.checked,
+        includeWorklog: includeWorklogCheckbox.checked,
+        includeChanges: includeChangesCheckbox.checked,
         includeThoughts: includeThoughtsCheckbox.checked,
         includeQuestionAnswers: false
       }
@@ -84,6 +90,9 @@ async function extractFromTab(tab) {
     return extensionCall(browserApi.tabs.sendMessage.bind(browserApi.tabs), tab.id, {
       type: "extractConversation",
       options: {
+        includeConversation: includeConversationCheckbox.checked,
+        includeWorklog: includeWorklogCheckbox.checked,
+        includeChanges: includeChangesCheckbox.checked,
         includeThoughts: includeThoughtsCheckbox.checked,
         includeQuestionAnswers: false
       }
