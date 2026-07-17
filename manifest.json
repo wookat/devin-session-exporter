@@ -30,6 +30,16 @@
   "content_scripts": [
     {
       "matches": [
+        "https://app.devin.ai/sessions/*"
+      ],
+      "js": [
+        "vauth.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
         "https://app.devin.ai/*",
         "https://devin.ai/*"
       ],
