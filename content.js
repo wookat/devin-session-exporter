@@ -1088,6 +1088,31 @@ function currentAccountEmail() {
   }
 }
 
+function decodeBase64Url(segment) {
+  const padded = String(segment).replace(/-/g, "+").replace(/_/g, "/");
+  const withPad = padded + "=".repeat((4 - (padded.length % 4)) % 4);
+  const binary = atob(withPad);
+  try {
+    return decodeURIComponent(binary.split("").map((c) => (
+      `%${c.charCodeAt(0).toString(16).padStart(2, "0")}`
+    )).join(""));
+  } catch {
+    return binary;
+  }
+}
+
+function jwtEmail(token) {
+  try {
+    const parts = String(token || "").split(".");
+    if (parts.length < 2) return "";
+    const payload = JSON.parse(decodeBase64Url(parts[1]));
+    return payload.email || payload.user_email || payload.preferred_username
+      || payload.emailAddress || "";
+  } catch {
+    return "";
+  }
+}
+
 let currentEmailCache = "";
 async function resolveCurrentAccountEmail() {
   const local = currentAccountEmail();
@@ -1095,8 +1120,13 @@ async function resolveCurrentAccountEmail() {
     currentEmailCache = local;
     return local;
   }
+  const authSession = readAuthSession();
+  const tokenEmail = jwtEmail(authSession?.token);
+  if (tokenEmail) {
+    currentEmailCache = tokenEmail;
+    return tokenEmail;
+  }
   try {
-    const authSession = readAuthSession();
     if (!authSession?.token) return currentEmailCache;
     const response = await fetch("/api/users/post-auth", {
       method: "POST",
@@ -2325,20 +2355,21 @@ function renderAccountRows() {
     const latest = accountLatestCache.get(key);
     if (latest && latest.session && latest.session.sessionId) {
       const label = document.createElement("span");
+      label.className = "devin-account-meta-label";
       label.textContent = "最新会话：";
       const link = document.createElement("a");
       link.href = "#";
       link.className = "devin-account-latest-link";
-      link.title = "点击打开该会话（不换号）";
-      const statusText = `${sessionStatusIcon(latest.session.status)} ${formatSessionStatus(latest.session.status)}`;
-      link.textContent = latest.session.title
-        ? `${latest.session.title} · ${statusText}`
-        : statusText;
+      link.title = latest.session.title || "点击打开该会话（不换号）";
+      link.textContent = latest.session.title || latest.session.sessionId;
       link.addEventListener("click", (event) => {
         event.preventDefault();
         openLatestSession(account, latest.session).catch((error) => setToolbarStatus(error.message, true));
       });
-      meta.append(label, link);
+      const status = document.createElement("span");
+      status.className = "devin-account-status";
+      status.textContent = `${sessionStatusIcon(latest.session.status)} ${formatSessionStatus(latest.session.status)}`;
+      meta.append(label, link, status);
     } else {
       meta.textContent = formatLatestSession(latest);
     }
@@ -2690,9 +2721,11 @@ function installToolbar() {
     .devin-account-balance{flex:none;font-size:12px;color:#aab3c1;white-space:nowrap;font-variant-numeric:tabular-nums}
     .devin-account-balance-negative,.devin-account-balance-error{color:#ff9ba3}
     .devin-account-balance-positive{color:#84dcae}
-    .devin-account-meta{overflow:hidden;padding-left:26px;font-size:11px;color:#7f8896;text-overflow:ellipsis;white-space:nowrap}
-    .devin-account-latest-link{color:#8ab4ff;cursor:pointer;text-decoration:none}
+    .devin-account-meta{display:flex;align-items:center;gap:4px;padding-left:26px;font-size:11px;color:#7f8896;white-space:nowrap}
+    .devin-account-meta-label{flex:none}
+    .devin-account-latest-link{flex:0 1 auto;min-width:0;overflow:hidden;color:#8ab4ff;cursor:pointer;text-decoration:none;text-overflow:ellipsis;white-space:nowrap}
     .devin-account-latest-link:hover{text-decoration:underline}
+    .devin-account-status{flex:none;color:#aab3c1}
     .devin-account-actions{display:flex;flex-wrap:wrap;gap:5px;padding-left:26px}
     .devin-account-actions button{padding:4px 9px;font-size:12px;background:#1e242e}
     .devin-account-sessions{margin-top:4px;padding:8px;border-radius:8px;background:#0d1117}
