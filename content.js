@@ -302,6 +302,65 @@ async function fetchBillingInfo() {
   };
 }
 
+async function fetchBalanceForCredentials(email, password) {
+  const loginResponse = await fetch("/api/auth1/password/login", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json"
+    },
+    credentials: "omit",
+    body: JSON.stringify({ email, password })
+  });
+  if (loginResponse.status === 401) {
+    throw new Error("无法查询（可能非密码账号）");
+  }
+  if (!loginResponse.ok) {
+    throw new Error(`账号登录查询失败（HTTP ${loginResponse.status}）`);
+  }
+  const login = await loginResponse.json();
+  if (!login?.token) {
+    throw new Error("账号登录查询未返回有效令牌");
+  }
+  const postAuthResponse = await fetch("/api/users/post-auth", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${login.token}`,
+      "content-type": "application/json",
+      accept: "application/json"
+    },
+    credentials: "omit",
+    body: "{}"
+  });
+  if (!postAuthResponse.ok) {
+    throw new Error(`获取账号组织失败（HTTP ${postAuthResponse.status}）`);
+  }
+  const postAuth = await postAuthResponse.json();
+  if (typeof postAuth?.org_id !== "string" || !postAuth.org_id) {
+    throw new Error("获取账号组织失败（缺少组织 ID）");
+  }
+  const headers = apiHeaders(login.token, postAuth.org_id);
+  const [statusResponse, limitsResponse] = await Promise.all([
+    fetch(`/api/${postAuth.org_id}/billing/status`, { headers, credentials: "omit" }),
+    fetch(`/api/${postAuth.org_id}/billing/usage/limits`, { headers, credentials: "omit" })
+  ]);
+  if (!statusResponse.ok) {
+    throw new Error(`读取账号余额失败（HTTP ${statusResponse.status}）`);
+  }
+  if (!limitsResponse.ok) {
+    throw new Error(`读取账号用量上限失败（HTTP ${limitsResponse.status}）`);
+  }
+  const status = await statusResponse.json();
+  const limits = await limitsResponse.json();
+  return {
+    overageCredits: status?.overage_credits ?? null,
+    availableCredits: status?.available_credits ?? null,
+    maxAcuLimit: limits?.max_acu_limit ?? null,
+    billingError: status?.billing_error ?? null,
+    orgName: postAuth?.org_name ?? null
+  };
+}
+
 function buildUsageLimitBody(dollars) {
   return { max_credits: dollars };
 }
@@ -923,6 +982,12 @@ function formatBalanceDisplay(info = {}) {
   return `余额 ${balanceText} · 上限 ${limitText}`;
 }
 
+function balanceToneClass(info = {}) {
+  return Number(info.overageCredits) < 0 || /out_of_quota/i.test(info.billingError || "")
+    ? "balance-negative"
+    : "balance-positive";
+}
+
 async function abortAutoSwitch(message) {
   await saveAutoSwitchState({
     phase: "failed",
@@ -1212,6 +1277,89 @@ async function runAutoSwitch() {
 
 let accountDraft = [];
 let editingAccountIndex = -1;
+const accountBalanceCache = new Map();
+
+function parseBatchAccounts(text) {
+  const accounts = [];
+  let skipped = 0;
+  for (const line of String(text || "").split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const fields = line.split(/-{3,}/);
+    const email = (fields[0] || "").trim();
+    const password = (fields[1] || "").trim();
+    if (!email.includes("@") || !password) {
+      skipped += 1;
+      continue;
+    }
+    accounts.push({
+      label: email,
+      email,
+      password
+    });
+  }
+  return { accounts, skipped };
+}
+
+function mergeBatchAccounts(existing, text) {
+  const merged = Array.isArray(existing) ? existing.map((account) => ({ ...account })) : [];
+  const indexes = new Map(merged.map((account, index) => [
+    String(account.email || "").trim().toLowerCase(),
+    index
+  ]));
+  const parsed = parseBatchAccounts(text);
+  for (const account of parsed.accounts) {
+    const key = account.email.toLowerCase();
+    const index = indexes.get(key);
+    if (index == null) {
+      indexes.set(key, merged.length);
+      merged.push(account);
+    } else {
+      merged[index] = {
+        ...merged[index],
+        password: account.password,
+        label: merged[index].label || account.label
+      };
+    }
+  }
+  return {
+    accounts: merged,
+    addedOrUpdated: parsed.accounts.length,
+    skipped: parsed.skipped
+  };
+}
+
+function formatAccountBalance(info) {
+  if (info?.loading) return "查询中…";
+  if (info?.error) return info.error;
+  return formatBalanceDisplay(info);
+}
+
+function accountBalanceClass(info) {
+  if (!info || info.error) return "account-balance-error";
+  return balanceToneClass(info).replace("balance-", "account-balance-");
+}
+
+async function queryAccountBalance(account) {
+  const key = String(account.email || "").trim().toLowerCase();
+  if (!key) return;
+  const rowState = { loading: true };
+  accountBalanceCache.set(key, rowState);
+  renderAccountRows();
+  try {
+    const info = await fetchBalanceForCredentials(account.email, account.password);
+    accountBalanceCache.set(key, info);
+  } catch (error) {
+    accountBalanceCache.set(key, { error: error.message || "无法查询余额" });
+  }
+  renderAccountRows();
+}
+
+async function refreshAllAccountBalances() {
+  for (const account of accountDraft) {
+    await queryAccountBalance(account);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+}
 
 function toolbarPhase(state) {
   const phase = document.getElementById("devin-exporter-phase");
@@ -1225,12 +1373,26 @@ function renderAccountRows() {
   accountDraft.forEach((account, index) => {
     const row = document.createElement("div");
     row.className = "devin-account-row";
-    const label = document.createElement("span");
+    const identity = document.createElement("div");
+    identity.className = "devin-account-identity";
+    const label = document.createElement("strong");
     label.textContent = `${index + 1}. ${account.label || account.email}`;
+    const email = document.createElement("span");
+    email.textContent = account.email;
+    identity.append(label, email);
+    const balance = document.createElement("span");
+    const balanceInfo = accountBalanceCache.get(String(account.email || "").trim().toLowerCase());
+    balance.className = `devin-account-balance ${accountBalanceClass(balanceInfo)}`;
+    balance.textContent = formatAccountBalance(balanceInfo);
+    const query = document.createElement("button");
+    query.type = "button";
+    query.textContent = "查余额";
+    query.addEventListener("click", () => queryAccountBalance(account));
     const edit = document.createElement("button");
     edit.type = "button";
     edit.textContent = "编辑";
     edit.addEventListener("click", () => {
+      accountBalanceCache.delete(String(account.email || "").trim().toLowerCase());
       document.getElementById("devin-account-label").value = account.label || "";
       document.getElementById("devin-account-email").value = account.email || "";
       document.getElementById("devin-account-password").value = account.password || "";
@@ -1240,6 +1402,7 @@ function renderAccountRows() {
     remove.type = "button";
     remove.textContent = "删除";
     remove.addEventListener("click", () => {
+      accountBalanceCache.delete(String(account.email || "").trim().toLowerCase());
       accountDraft.splice(index, 1);
       renderAccountRows();
     });
@@ -1259,7 +1422,7 @@ function renderAccountRows() {
       [accountDraft[index], accountDraft[index + 1]] = [accountDraft[index + 1], accountDraft[index]];
       renderAccountRows();
     });
-    row.append(label, edit, remove, up, down);
+    row.append(identity, balance, query, edit, remove, up, down);
     list.appendChild(row);
   });
 }
@@ -1348,6 +1511,26 @@ function addAccountFromPanel() {
   setToolbarStatus("账号已加入列表，请保存设置");
 }
 
+async function addBatchAccountsFromPanel() {
+  const panel = document.getElementById("devin-exporter-settings");
+  if (!panel) return;
+  const textarea = panel.querySelector("#devin-batch-accounts");
+  const result = mergeBatchAccounts(accountDraft, textarea.value);
+  accountDraft = result.accounts;
+  accountBalanceCache.clear();
+  textarea.value = "";
+  renderAccountRows();
+  try {
+    await saveManagedAccounts(
+      accountDraft,
+      panel.querySelector("#devin-encrypt-accounts").checked
+    );
+    setToolbarStatus(`已添加/更新 ${result.addedOrUpdated} 个账号，跳过 ${result.skipped} 行`);
+  } catch (error) {
+    setToolbarStatus(error.message || "批量保存账号失败", true);
+  }
+}
+
 function readTargetUsageLimit(panel) {
   const value = Number(panel.querySelector("#devin-target-limit").value);
   if (!Number.isFinite(value) || value < 0) {
@@ -1394,17 +1577,39 @@ function installToolbar() {
   const style = document.createElement("style");
   style.id = "devin-exporter-style";
   style.textContent = `
-    #devin-exporter-toolbar,#devin-exporter-settings{position:fixed;z-index:2147483647;right:18px;bottom:18px;font:13px system-ui,sans-serif;color:#172033}
-    #devin-exporter-toolbar{display:flex;gap:6px;align-items:center;padding:8px;border:1px solid #c9d2e3;border-radius:8px;background:#fff;box-shadow:0 3px 14px #0002}
-    #devin-exporter-toolbar button,#devin-exporter-settings button{border:1px solid #aab7cc;border-radius:5px;background:#f7f9fc;color:#172033;padding:5px 8px;cursor:pointer}
+    #devin-exporter-toolbar,#devin-exporter-settings{position:fixed;z-index:2147483647;font:13px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#e8edf7;color-scheme:dark}
+    #devin-exporter-toolbar{right:18px;bottom:18px;display:flex;gap:7px;align-items:center;max-width:calc(100vw - 36px);padding:8px 10px;border:1px solid #39465d;border-radius:14px;background:#151c29eF;box-shadow:0 10px 30px #0008;backdrop-filter:blur(12px)}
+    #devin-exporter-toolbar button,#devin-exporter-settings button{border:1px solid #3e4d66;border-radius:8px;background:#202b3d;color:#e8edf7;padding:6px 10px;cursor:pointer;transition:background .15s,border-color .15s,transform .15s}
+    #devin-exporter-toolbar button:hover,#devin-exporter-settings button:hover{background:#2b3a53;border-color:#617596}
+    #devin-exporter-toolbar button:active,#devin-exporter-settings button:active{transform:translateY(1px)}
+    #devin-exporter-toolbar #devin-export-handoff{border-color:#4d8bff;background:#2768d8;color:#fff}
+    #devin-exporter-toolbar #devin-export-handoff:hover{background:#3479ed}
     #devin-exporter-toolbar button:disabled{cursor:not-allowed;opacity:.5}
-    #devin-exporter-status{max-width:220px;color:#315b8f} #devin-exporter-status[data-error=true]{color:#b3261e}
-    #devin-exporter-phase{font-size:11px;color:#58657a}
-    #devin-exporter-settings{right:18px;bottom:72px;width:440px;max-height:80vh;overflow:auto;padding:12px;border:1px solid #c9d2e3;border-radius:8px;background:#fff;box-shadow:0 3px 14px #0002}
-    #devin-exporter-settings input{box-sizing:border-box;width:100%;margin:3px 0;padding:5px}
-    #devin-exporter-settings textarea{width:100%;height:180px;box-sizing:border-box}
-    .devin-account-row{display:flex;gap:4px;align-items:center;margin:5px 0}.devin-account-row span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .devin-settings-actions{display:flex;gap:5px;margin-top:8px}
+    #devin-exporter-balance{padding:4px 8px;border:1px solid #3e526e;border-radius:999px;background:#1e2a3d;color:#b8c7df;white-space:nowrap}
+    #devin-exporter-balance.balance-negative{border-color:#91454f;background:#3a2028;color:#ffadb5}
+    #devin-exporter-balance.balance-positive{border-color:#3d795c;background:#1b352b;color:#9be0b6}
+    #devin-exporter-status{max-width:220px;overflow:hidden;color:#aebbd0;text-overflow:ellipsis;white-space:nowrap}
+    #devin-exporter-status[data-error=true]{color:#ffadb5}
+    #devin-exporter-phase{font-size:11px;color:#8f9db4;white-space:nowrap}
+    #devin-exporter-settings{right:18px;bottom:72px;width:min(520px,calc(100vw - 36px));max-height:82vh;overflow:auto;padding:18px;border:1px solid #39465d;border-radius:16px;background:#121925f5;box-shadow:0 16px 42px #000b;backdrop-filter:blur(16px)}
+    #devin-exporter-settings h2{margin:0;font-size:17px;color:#f5f7fb}
+    #devin-exporter-settings h3{margin:0 0 9px;font-size:13px;color:#dbe5f5}
+    #devin-exporter-settings p{margin:7px 0 12px;color:#94a3ba;line-height:1.45}
+    #devin-exporter-settings input,#devin-exporter-settings textarea{box-sizing:border-box;width:100%;margin:4px 0;padding:8px 9px;border:1px solid #35445c;border-radius:8px;background:#0e1522;color:#e8edf7;outline:none}
+    #devin-exporter-settings input:focus,#devin-exporter-settings textarea:focus{border-color:#568fff;box-shadow:0 0 0 2px #568fff33}
+    #devin-exporter-settings textarea{height:150px;resize:vertical}
+    #devin-exporter-settings label{display:flex;gap:8px;align-items:center;margin:9px 0;color:#c4cee0}
+    #devin-exporter-settings label input{width:auto;margin:0}
+    .devin-settings-section{padding:13px 0;border-top:1px solid #29364b}
+    .devin-settings-section:first-of-type{border-top:0;padding-top:10px}
+    .devin-settings-actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:9px}
+    .devin-account-row{display:grid;grid-template-columns:minmax(120px,1fr) auto auto;gap:7px;align-items:center;margin:7px 0;padding:8px;border:1px solid #2d3b51;border-radius:10px;background:#182233}
+    .devin-account-identity{min-width:0;display:flex;flex-direction:column;gap:2px}
+    .devin-account-identity strong{overflow:hidden;color:#e7edf8;text-overflow:ellipsis;white-space:nowrap}
+    .devin-account-identity span{overflow:hidden;color:#8797b0;text-overflow:ellipsis;white-space:nowrap}
+    .devin-account-balance{grid-column:1 / -1;font-size:12px;color:#aebbd0}
+    .devin-account-balance-negative,.devin-account-balance-error{color:#ffadb5}
+    .devin-account-balance-positive{color:#9be0b6}
   `;
   document.documentElement.appendChild(style);
   const toolbar = document.createElement("div");
@@ -1422,26 +1627,44 @@ function installToolbar() {
   panel.id = "devin-exporter-settings";
   panel.hidden = true;
   panel.innerHTML = `
-    <strong>账号管理</strong>
-    <p>账号密码仅用于本地自动登录；建议启用主密码加密。此功能可能触发服务条款、封号和本地密码存储风险，仅支持无 2FA 的邮箱密码账号。</p>
-    <div id="devin-account-list"></div>
-    <input id="devin-account-label" type="text" placeholder="账号标签">
-    <input id="devin-account-email" type="email" placeholder="邮箱">
-    <input id="devin-account-password" type="password" placeholder="密码">
-    <div class="devin-settings-actions"><button id="devin-account-add" type="button">添加/更新账号</button></div>
-    <label><input id="devin-encrypt-accounts" type="checkbox"> 使用主密码加密账号列表</label>
-    <label><input id="devin-auto-switch" type="checkbox"> 启用自动换号</label>
-    <label><input id="devin-auto-send" type="checkbox" checked> 自动发送续接</label>
-    <input id="devin-target-limit" type="number" min="0" step="0.01" placeholder="每个账号消息用量上限（美元）">
-    <button id="devin-apply-limit" type="button">将当前账号上限设为目标值</button>
-    <hr>
-    <strong>续接模板</strong>
-    <textarea id="devin-template" placeholder="续接模板"></textarea>
-    <div class="devin-settings-actions">
-      <button id="devin-save-settings" type="button">保存设置</button>
-      <button id="devin-reset-template" type="button">恢复默认模板</button>
-      <button id="devin-close-settings" type="button">关闭</button>
-    </div>
+    <div class="devin-settings-header"><h2>Devin Exporter 设置</h2></div>
+    <section class="devin-settings-section">
+      <h3>账号管理</h3>
+      <p>账号密码仅用于本地自动登录；建议启用主密码加密。此功能可能触发服务条款、封号和本地密码存储风险，仅支持无 2FA 的邮箱密码账号。</p>
+      <div id="devin-account-list"></div>
+      <input id="devin-account-label" type="text" placeholder="账号标签">
+      <input id="devin-account-email" type="email" placeholder="邮箱">
+      <input id="devin-account-password" type="password" placeholder="密码">
+      <div class="devin-settings-actions"><button id="devin-account-add" type="button">添加/更新账号</button></div>
+    </section>
+    <section class="devin-settings-section">
+      <h3>批量添加</h3>
+      <textarea id="devin-batch-accounts" placeholder="每行：邮箱---密码---可选备注"></textarea>
+      <div class="devin-settings-actions"><button id="devin-batch-add" type="button">批量添加账号</button></div>
+    </section>
+    <section class="devin-settings-section">
+      <h3>余额</h3>
+      <input id="devin-target-limit" type="number" min="0" step="0.01" placeholder="每个账号消息用量上限（美元）">
+      <div class="devin-settings-actions">
+        <button id="devin-apply-limit" type="button">将当前账号上限设为目标值</button>
+        <button id="devin-refresh-all-balances" type="button">刷新全部余额</button>
+      </div>
+    </section>
+    <section class="devin-settings-section">
+      <h3>自动换号设置</h3>
+      <label><input id="devin-encrypt-accounts" type="checkbox"> 使用主密码加密账号列表</label>
+      <label><input id="devin-auto-switch" type="checkbox"> 启用自动换号</label>
+      <label><input id="devin-auto-send" type="checkbox" checked> 自动发送续接</label>
+    </section>
+    <section class="devin-settings-section">
+      <h3>续接模板</h3>
+      <textarea id="devin-template" placeholder="续接模板"></textarea>
+      <div class="devin-settings-actions">
+        <button id="devin-save-settings" type="button">保存设置</button>
+        <button id="devin-reset-template" type="button">恢复默认模板</button>
+        <button id="devin-close-settings" type="button">关闭</button>
+      </div>
+    </section>
   `;
   document.body.appendChild(panel);
   toolbar.querySelector("#devin-export-handoff").addEventListener("click", exportHandoffInPage);
@@ -1455,7 +1678,13 @@ function installToolbar() {
     }).catch((error) => setToolbarStatus(error.message, true));
   });
   panel.querySelector("#devin-account-add").addEventListener("click", addAccountFromPanel);
+  panel.querySelector("#devin-batch-add").addEventListener("click", () => {
+    addBatchAccountsFromPanel().catch((error) => setToolbarStatus(error.message, true));
+  });
   panel.querySelector("#devin-apply-limit").addEventListener("click", applyTargetUsageLimit);
+  panel.querySelector("#devin-refresh-all-balances").addEventListener("click", () => {
+    refreshAllAccountBalances().catch((error) => setToolbarStatus(error.message, true));
+  });
   panel.querySelector("#devin-save-settings").addEventListener("click", saveSettingsPanel);
   panel.querySelector("#devin-reset-template").addEventListener("click", () => {
     panel.querySelector("#devin-template").value = DEFAULT_HANDOFF_TEMPLATE;
@@ -1482,8 +1711,10 @@ async function refreshBalanceDisplay() {
   try {
     const info = await fetchBillingInfo();
     element.textContent = formatBalanceDisplay(info);
+    element.className = balanceToneClass(info);
   } catch {
     element.textContent = "余额 —";
+    element.className = "";
   }
 }
 
@@ -1495,7 +1726,7 @@ if (typeof document !== "undefined" && isAutoSwitchHost) {
   if (isAppHost) {
     installToolbar();
     updateToolbar();
-    setInterval(() => refreshBalanceDisplay(), 60000);
+    setInterval(() => refreshBalanceDisplay(), 30000);
     new MutationObserver(() => {
       installToolbar();
       updateToolbar();
@@ -1536,6 +1767,8 @@ if (typeof module !== "undefined") {
     applyHandoff,
     buildUsageLimitBody,
     formatBalanceDisplay,
+    parseBatchAccounts,
+    mergeBatchAccounts,
     selectNextAccount,
     routeAutoSwitch
   };
