@@ -302,7 +302,7 @@ async function fetchBillingInfo() {
   };
 }
 
-async function fetchBalanceForCredentials(email, password) {
+async function resolveAccountAuth(email, password) {
   const loginResponse = await fetch("/api/auth1/password/login", {
     method: "POST",
     headers: {
@@ -339,10 +339,21 @@ async function fetchBalanceForCredentials(email, password) {
   if (typeof postAuth?.org_id !== "string" || !postAuth.org_id) {
     throw new Error("获取账号组织失败（缺少组织 ID）");
   }
-  const headers = apiHeaders(login.token, postAuth.org_id);
+  return {
+    email,
+    token: login.token,
+    userId: login.userId || login.uid || login.user_id || postAuth.user_id || postAuth.uid || null,
+    orgId: postAuth.org_id,
+    orgName: postAuth.org_name ?? null
+  };
+}
+
+async function fetchBalanceForCredentials(email, password) {
+  const auth = await resolveAccountAuth(email, password);
+  const headers = apiHeaders(auth.token, auth.orgId);
   const [statusResponse, limitsResponse] = await Promise.all([
-    fetch(`/api/${postAuth.org_id}/billing/status`, { headers, credentials: "omit" }),
-    fetch(`/api/${postAuth.org_id}/billing/usage/limits`, { headers, credentials: "omit" })
+    fetch(`/api/${auth.orgId}/billing/status`, { headers, credentials: "omit" }),
+    fetch(`/api/${auth.orgId}/billing/usage/limits`, { headers, credentials: "omit" })
   ]);
   if (!statusResponse.ok) {
     throw new Error(`读取账号余额失败（HTTP ${statusResponse.status}）`);
@@ -357,8 +368,99 @@ async function fetchBalanceForCredentials(email, password) {
     availableCredits: status?.available_credits ?? null,
     maxAcuLimit: limits?.max_acu_limit ?? null,
     billingError: status?.billing_error ?? null,
-    orgName: postAuth?.org_name ?? null
+    orgName: auth.orgName
   };
+}
+
+function normalizeSessionRecord(record) {
+  const raw = record && typeof record === "object" ? record : {};
+  let devinId = raw.devin_id || raw.session_id || raw.id || raw.devinId
+    || raw.sessionId || raw.uuid || raw.conversation_id || raw.conversationId || raw.query_id || "";
+  if (!devinId) {
+    for (const key of ["url", "session_url", "web_url", "link"]) {
+      const match = String(raw[key] || "").match(/\/sessions\/([A-Za-z0-9-]+)/);
+      if (match) {
+        devinId = `devin-${match[1].replace(/^devin-/, "")}`;
+        break;
+      }
+    }
+  }
+  devinId = String(devinId || "");
+  if (devinId && !devinId.startsWith("devin-")) devinId = `devin-${devinId}`;
+  const sessionId = devinId.replace(/^devin-/, "");
+  return {
+    devinId,
+    sessionId,
+    title: raw.title || raw.name || raw.prompt || sessionId || "未命名",
+    status: raw.status_enum || raw.status || raw.state || "",
+    updatedAt: raw.updated_at || raw.last_updated_at || raw.updated || "",
+    createdAt: raw.created_at || raw.created || ""
+  };
+}
+
+async function fetchSessionsForToken(token, orgId, limit = 200) {
+  const headers = { ...apiHeaders(token, orgId) };
+  const pickArray = (payload) => {
+    for (const key of ["result", "sessions", "data"]) {
+      if (Array.isArray(payload?.[key])) return payload[key];
+    }
+    return Array.isArray(payload) ? payload : [];
+  };
+  const primary = await fetch(
+    `/api/${orgId}/v2sessions${limit ? `?limit=${limit}` : ""}`,
+    { headers, credentials: "omit" }
+  );
+  if (primary.ok) {
+    const payload = await primary.json();
+    const list = pickArray(payload);
+    if (list.length || payload?.result || payload?.sessions) {
+      return list.map(normalizeSessionRecord).filter((session) => session.devinId);
+    }
+  }
+  const fallback = await fetch("/api/sessions", { headers, credentials: "omit" });
+  if (!fallback.ok) {
+    throw new Error(`读取会话列表失败（HTTP ${fallback.status}）`);
+  }
+  return pickArray(await fallback.json()).map(normalizeSessionRecord).filter((session) => session.devinId);
+}
+
+async function fetchSessionsForCredentials(email, password) {
+  const auth = await resolveAccountAuth(email, password);
+  const sessions = await fetchSessionsForToken(auth.token, auth.orgId);
+  return { auth, sessions };
+}
+
+async function exportListedSessionHandoff(session, auth) {
+  const events = await fetchAllEvents(session.devinId, auth.token, auth.orgId);
+  const data = {
+    sessionId: session.sessionId,
+    url: `https://app.devin.ai/sessions/${session.sessionId}`,
+    title: session.title,
+    exportedAt: new Date().toISOString(),
+    orgId: auth.orgId,
+    messages: await inlineAttachments(buildMessages(events, {}), auth.token, auth.orgId),
+    worklog: buildWorklog(events)
+  };
+  return buildHandoff(data, { includeFullConversation: false });
+}
+
+function buildVauthPayload(auth) {
+  const payload = {
+    token: auth.token,
+    userId: auth.userId || null,
+    orgId: auth.orgId,
+    orgIds: auth.orgId ? [auth.orgId] : [],
+    email: auth.email || null
+  };
+  const json = JSON.stringify(payload);
+  const base64 = typeof btoa === "function"
+    ? btoa(unescape(encodeURIComponent(json)))
+    : Buffer.from(json, "utf8").toString("base64");
+  return encodeURIComponent(base64);
+}
+
+function buildIsolatedSessionUrl(session, auth) {
+  return `https://app.devin.ai/sessions/${session.sessionId}#daoauth=${buildVauthPayload(auth)}`;
 }
 
 function buildUsageLimitBody(dollars) {
@@ -569,18 +671,140 @@ function collapsePriorHandoff(value) {
   return prefix ? `${prefix}\n${HANDOFF_COLLAPSE_PLACEHOLDER}` : HANDOFF_COLLAPSE_PLACEHOLDER;
 }
 
+const ATTACHMENT_MARKER_RE = /ATTACHMENT:(\{[^\n]*?\}|"[^"\n]*"|https?:\/\/\S+)/g;
+const TEXT_ATTACHMENT_EXT = /\.(?:md|markdown|txt|text|json|log|csv|tsv|ya?ml|diff|patch|xml|html?)(?:\?|$)/i;
+const MAX_INLINE_ATTACHMENT_BYTES = 100 * 1024;
+const CLUSTER_SIGNATURE = /tailscale/i;
+const CLUSTER_SIGNATURE_2 = /\bsgpu\b/i;
+const CLUSTER_COLLAPSE_PLACEHOLDER = "[集群接入说明：与前述模板相同，已折叠。见续接模板 / xu-1]";
+
+function parseAttachmentMarker(marker) {
+  const payload = String(marker).slice("ATTACHMENT:".length).trim();
+  if (payload.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(payload);
+      return { url: String(parsed.url || ""), fileSize: Number(parsed.fileSize) };
+    } catch {
+      return { url: "", fileSize: NaN };
+    }
+  }
+  if (payload.startsWith("\"")) {
+    try {
+      return { url: String(JSON.parse(payload) || ""), fileSize: NaN };
+    } catch {
+      return { url: "", fileSize: NaN };
+    }
+  }
+  return { url: payload, fileSize: NaN };
+}
+
+function attachmentName(url) {
+  try {
+    const last = String(url).split("/").pop().split("?")[0];
+    return decodeURIComponent(last) || "attachment";
+  } catch {
+    return "attachment";
+  }
+}
+
+function attachmentNote(url, fileSize) {
+  const name = attachmentName(url);
+  const size = Number.isFinite(fileSize) ? ` · ${Math.max(1, Math.round(fileSize / 1024))}KB` : "";
+  return `[附件已省略：${name}${size}]`;
+}
+
+function summarizeAttachmentMarkers(value) {
+  return String(value || "")
+    .replace(ATTACHMENT_MARKER_RE, (marker) => {
+      const { url, fileSize } = parseAttachmentMarker(marker);
+      return url ? attachmentNote(url, fileSize) : "";
+    })
+    .replace(/\n{3,}/g, "\n\n");
+}
+
+async function fetchAttachmentText(url, token, orgId) {
+  const attempts = [{ credentials: "include" }];
+  if (token) attempts.push({ headers: apiHeaders(token, orgId), credentials: "omit" });
+  for (const init of attempts) {
+    try {
+      const response = await fetch(url, init);
+      if (!response.ok) continue;
+      const text = await response.text();
+      return text.length > MAX_INLINE_ATTACHMENT_BYTES
+        ? `${text.slice(0, MAX_INLINE_ATTACHMENT_BYTES)}\n…（已截断）`
+        : text;
+    } catch {
+      // Try the next auth strategy.
+    }
+  }
+  return null;
+}
+
+async function inlineAttachmentsInText(value, token, orgId) {
+  const text = String(value || "");
+  const markers = text.match(ATTACHMENT_MARKER_RE);
+  if (!markers) return text;
+  let result = text;
+  for (const marker of markers) {
+    const { url, fileSize } = parseAttachmentMarker(marker);
+    let replacement = "";
+    if (url && TEXT_ATTACHMENT_EXT.test(url)
+      && (!Number.isFinite(fileSize) || fileSize <= MAX_INLINE_ATTACHMENT_BYTES)) {
+      const content = await fetchAttachmentText(url, token, orgId);
+      const name = attachmentName(url);
+      replacement = content != null
+        ? `\n\n<附件 ${name}>\n${content.trim()}\n</附件 ${name}>\n`
+        : `[附件（抓取失败）：${name}]`;
+    } else if (url) {
+      replacement = attachmentNote(url, fileSize);
+    }
+    result = result.replace(marker, replacement);
+  }
+  return result.replace(/\n{3,}/g, "\n\n");
+}
+
+async function inlineAttachments(messages, token, orgId) {
+  const out = [];
+  for (const message of Array.isArray(messages) ? messages : []) {
+    out.push({ ...message, text: await inlineAttachmentsInText(message.text, token, orgId) });
+  }
+  return out;
+}
+
+function collapseNoise(value, options = {}) {
+  const maxLen = Number.isFinite(options.maxLen) ? options.maxLen : 1500;
+  const seen = options.seen instanceof Set ? options.seen : null;
+  let text = summarizeAttachmentMarkers(collapsePriorHandoff(value)).trim();
+  if (seen && CLUSTER_SIGNATURE.test(text) && CLUSTER_SIGNATURE_2.test(text) && text.length > 400) {
+    if (seen.has("cluster")) {
+      return CLUSTER_COLLAPSE_PLACEHOLDER;
+    }
+    seen.add("cluster");
+  }
+  if (text.length > maxLen) {
+    text = `${text.slice(0, maxLen).trimEnd()}\n…（已截断，完整历史见 xu-1）`;
+  }
+  return text;
+}
+
+function summarizeTodos(todos) {
+  const list = Array.isArray(todos) ? todos : [];
+  const done = list.filter((todo) => todo.status === "completed").length;
+  const inProgress = list.filter((todo) => todo.status === "in_progress").length;
+  const pending = list.filter((todo) => todo.status && todo.status !== "completed" && todo.status !== "in_progress").length;
+  return { total: list.length, done, inProgress, pending };
+}
+
 function buildHandoff(data, options = {}) {
   const messages = Array.isArray(data.messages) ? data.messages : [];
   const worklog = Array.isArray(data.worklog) ? data.worklog : [];
-  const collapsedMessages = messages.map((message) => (
-    message.role === "user"
-      ? { ...message, text: collapsePriorHandoff(message.text) }
-      : message
-  ));
-  const users = collapsedMessages.filter((message) => message.role === "user");
-  const decisions = messages.filter((message) => (
-    message.role === "devin" && message.type === "devin_message"
-  ));
+  const seenBlocks = new Set();
+  const users = messages
+    .filter((message) => message.role === "user")
+    .map((message) => ({ ...message, text: collapseNoise(message.text, { maxLen: 800, seen: seenBlocks }) }));
+  const decisions = messages
+    .filter((message) => message.role === "devin" && message.type === "devin_message")
+    .map((message) => ({ ...message, text: collapseNoise(message.text, { maxLen: 1500 }) }));
   const latestTodos = [...worklog].reverse().find((entry) => entry.kind === "todos");
   const files = [...new Set(worklog
     .filter((entry) => entry.kind === "file" && entry.action !== "read" && entry.path)
@@ -607,12 +831,25 @@ function buildHandoff(data, options = {}) {
     if (entry.kind === "search") return `Search ${entry.regex || ""} in ${entry.path || "unknown path"}`;
     return handoffSafeText(entry.text || entry.kind);
   });
+  const todos = latestTodos && Array.isArray(latestTodos.todos) ? latestTodos.todos : [];
+  const stats = summarizeTodos(todos);
+  const nextSteps = todos.filter((todo) => todo.status !== "completed").slice(0, 5);
+  const objective = users.length ? handoffSafeText(users[0].text).replace(/\s+/g, " ").slice(0, 240) : "";
   const lines = [
     "# Devin Context Handoff",
     "",
     `Source session: ${data.title || "Devin session"}`,
     `Source URL: ${data.url || ""}`,
     `Exported at: ${data.exportedAt || ""}`,
+    "",
+    "## TL;DR（先读这里）",
+    `- 目标：${objective || "（未捕获用户消息）"}`,
+    `- 进度：${stats.done}/${stats.total} 完成` + (stats.inProgress ? ` · 进行中 ${stats.inProgress}` : "") + (stats.pending ? ` · 待办 ${stats.pending}` : ""),
+    "- 下一步：",
+    ...(nextSteps.length
+      ? nextSteps.map((todo) => `  - [ ] ${handoffSafeText(todo.content)}`)
+      : ["  - （无未完成 TODO；见下方决策/最近动作）"]),
+    "- 全量历史在 xu-1 的 ~/wookat 与 CONTINUATION.md；本文件只带最近增量。",
     "",
     "## Continuity",
     "Full cross-session history lives on xu-1 at ~/wookat and CONTINUATION.md.",
@@ -626,8 +863,8 @@ function buildHandoff(data, options = {}) {
     ...(decisions.length ? decisions.map((message) => `- ${handoffSafeText(message.text)}`) : ["No Devin conclusions captured."]),
     "",
     "## Current status",
-    ...(latestTodos && Array.isArray(latestTodos.todos)
-      ? latestTodos.todos.map((todo) => `- ${todo.status === "completed" ? "[x]" : "[ ]"} ${handoffSafeText(todo.content)}`)
+    ...(todos.length
+      ? todos.map((todo) => `- ${todo.status === "completed" ? "[x]" : "[ ]"} ${handoffSafeText(todo.content)}`)
       : ["No todo state captured."]),
     "",
     "## Environment and how to resume",
@@ -639,10 +876,14 @@ function buildHandoff(data, options = {}) {
     "## Recent major actions",
     ...(majorText.length ? majorText.map((item) => `- ${item}`) : ["No major actions captured."])
   ];
-  if (options.includeFullConversation !== false) {
+  if (options.includeFullConversation === true) {
     lines.push("", "## Full conversation", "The following messages are the complete captured conversation:", "");
-    for (const message of collapsedMessages) {
-      lines.push(`### ${message.role === "user" ? "User" : "Devin"}`, handoffSafeText(message.text), "");
+    for (const message of messages) {
+      lines.push(
+        `### ${message.role === "user" ? "User" : "Devin"}`,
+        collapseNoise(message.text, { maxLen: Number.POSITIVE_INFINITY }),
+        ""
+      );
     }
   }
   return `${lines.join("\n").trimEnd()}\n`;
@@ -976,10 +1217,14 @@ function loginErrorVisible() {
 
 function formatBalanceDisplay(info = {}) {
   const overage = Number(info.overageCredits);
+  const available = Number(info.availableCredits);
   const limit = Number(info.maxAcuLimit);
   const balanceText = Number.isFinite(overage) ? `$${overage.toFixed(2)}` : "—";
   const limitText = Number.isFinite(limit) ? `$${limit}` : "—";
-  return `余额 ${balanceText} · 上限 ${limitText}`;
+  const parts = [`余额 ${balanceText}`];
+  if (Number.isFinite(available)) parts.push(`可用 $${available.toFixed(2)}`);
+  parts.push(`上限 ${limitText}`);
+  return parts.join(" · ");
 }
 
 function balanceToneClass(info = {}) {
@@ -1198,18 +1443,21 @@ async function exportHandoffForSwitch(options = {}) {
     includeChanges: true,
     includeThoughts: false
   });
-  const handoff = buildHandoff(data, {
-    includeFullConversation: options.includeFullConversation === true
-  });
+  const token = (readAuthSession() || {}).token || null;
+  data.messages = await inlineAttachments(data.messages, token, data.orgId);
+  const compact = buildHandoff(data, { includeFullConversation: false });
   await storageSet({
     lastHandoff: {
-      text: handoff,
+      text: compact,
       exportedAt: new Date().toISOString(),
       title: data.title,
       url: data.url
     }
   });
-  return data;
+  const full = options.includeFullConversation === true
+    ? buildHandoff(data, { includeFullConversation: true })
+    : null;
+  return { data, compact, full };
 }
 
 async function beginAutoSwitch(manual = false) {
@@ -1279,23 +1527,80 @@ let accountDraft = [];
 let editingAccountIndex = -1;
 const accountBalanceCache = new Map();
 
+const ACCOUNT_LINE_DELIMITERS = [
+  /-{3,}/,
+  /\t+/,
+  /\|/,
+  /,/,
+  / {1,}/,
+  /:/
+];
+
+function normalizeAccountObject(candidate) {
+  if (!candidate || typeof candidate !== "object") return null;
+  let email = "";
+  let password = "";
+  let label = "";
+  for (const key of Object.keys(candidate)) {
+    const normalized = key.toLowerCase();
+    const value = candidate[key];
+    if (typeof value !== "string" && typeof value !== "number") continue;
+    const text = String(value).trim();
+    if (!email && ["email", "username", "user", "account", "mail", "login"].includes(normalized)) {
+      email = text;
+    } else if (!password && ["password", "pass", "pwd", "pw", "secret"].includes(normalized)) {
+      password = text;
+    } else if (!label && ["label", "name", "tag", "note", "alias"].includes(normalized)) {
+      label = text;
+    }
+  }
+  if (!email.includes("@") || !password) return null;
+  return { label: label || email, email, password };
+}
+
+function parseAccountLine(line) {
+  const trimmed = String(line || "").trim();
+  if (!trimmed) return null;
+  if (trimmed[0] === "{") {
+    try {
+      return normalizeAccountObject(JSON.parse(trimmed));
+    } catch {
+      return null;
+    }
+  }
+  for (const delimiter of ACCOUNT_LINE_DELIMITERS) {
+    if (!delimiter.test(trimmed)) continue;
+    const fields = trimmed.split(delimiter).map((field) => field.trim()).filter(Boolean);
+    if (fields.length >= 2 && fields[0].includes("@")) {
+      return { label: fields[0], email: fields[0], password: fields[1] };
+    }
+  }
+  return null;
+}
+
 function parseBatchAccounts(text) {
+  const raw = String(text || "");
   const accounts = [];
   let skipped = 0;
-  for (const line of String(text || "").split(/\r?\n/)) {
-    if (!line.trim()) continue;
-    const fields = line.split(/-{3,}/);
-    const email = (fields[0] || "").trim();
-    const password = (fields[1] || "").trim();
-    if (!email.includes("@") || !password) {
-      skipped += 1;
-      continue;
+  const push = (account) => {
+    if (account) accounts.push(account);
+    else skipped += 1;
+  };
+  const trimmedAll = raw.trim();
+  if (trimmedAll.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmedAll);
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) push(normalizeAccountObject(item));
+        return { accounts, skipped };
+      }
+    } catch {
+      // Fall back to line-by-line parsing below.
     }
-    accounts.push({
-      label: email,
-      email,
-      password
-    });
+  }
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    push(parseAccountLine(line));
   }
   return { accounts, skipped };
 }
@@ -1361,6 +1666,123 @@ async function refreshAllAccountBalances() {
   }
 }
 
+const accountSessionsCache = new Map();
+
+function accountKey(account) {
+  return String(account?.email || "").trim().toLowerCase();
+}
+
+async function toggleAccountSessions(account) {
+  const key = accountKey(account);
+  if (!key) return;
+  const existing = accountSessionsCache.get(key);
+  if (existing && !existing.loading && !existing.error) {
+    existing.expanded = !existing.expanded;
+    accountSessionsCache.set(key, existing);
+    renderAccountRows();
+    return;
+  }
+  accountSessionsCache.set(key, { loading: true, expanded: true, filter: "" });
+  renderAccountRows();
+  try {
+    const { auth, sessions } = await fetchSessionsForCredentials(account.email, account.password);
+    accountSessionsCache.set(key, { auth, sessions, expanded: true, filter: "" });
+  } catch (error) {
+    accountSessionsCache.set(key, { error: error.message || "无法查询会话", expanded: true });
+  }
+  renderAccountRows();
+}
+
+function openIsolatedSession(session, auth) {
+  const url = buildIsolatedSessionUrl(session, auth);
+  if (typeof window !== "undefined" && typeof window.open === "function") {
+    window.open(url, "_blank", "noopener");
+  }
+}
+
+async function exportSessionFromList(session, auth) {
+  try {
+    setToolbarStatus(`正在导出会话 Handoff：${session.title}...`);
+    const text = await exportListedSessionHandoff(session, auth);
+    const link = document.createElement("a");
+    link.href = `data:text/markdown;charset=utf-8,${encodeURIComponent(text)}`;
+    link.download = `devin-handoff-${session.sessionId.slice(0, 12)}-${Date.now()}.md`;
+    link.click();
+    setToolbarStatus(`已导出会话：${session.title}`);
+  } catch (error) {
+    setToolbarStatus(error.message || "会话 Handoff 导出失败", true);
+  }
+}
+
+function renderAccountSessions(container, account) {
+  const key = accountKey(account);
+  const state = accountSessionsCache.get(key);
+  if (!state || !state.expanded) return;
+  const panel = document.createElement("div");
+  panel.className = "devin-account-sessions";
+  if (state.loading) {
+    panel.textContent = "正在读取会话列表…";
+    container.appendChild(panel);
+    return;
+  }
+  if (state.error) {
+    panel.className = "devin-account-sessions devin-account-balance-error";
+    panel.textContent = state.error;
+    container.appendChild(panel);
+    return;
+  }
+  const search = document.createElement("input");
+  search.type = "search";
+  search.className = "devin-session-filter";
+  search.placeholder = `搜索 ${state.sessions.length} 个会话…`;
+  search.value = state.filter || "";
+  search.addEventListener("input", () => {
+    state.filter = search.value;
+    accountSessionsCache.set(key, state);
+    renderAccountSessionsList(listWrap, account, state);
+  });
+  panel.appendChild(search);
+  const listWrap = document.createElement("div");
+  listWrap.className = "devin-session-list";
+  panel.appendChild(listWrap);
+  container.appendChild(panel);
+  renderAccountSessionsList(listWrap, account, state);
+}
+
+function renderAccountSessionsList(listWrap, account, state) {
+  listWrap.textContent = "";
+  const needle = String(state.filter || "").trim().toLowerCase();
+  const filtered = state.sessions.filter((session) => {
+    if (!needle) return true;
+    return `${session.title} ${session.sessionId}`.toLowerCase().includes(needle);
+  });
+  if (!filtered.length) {
+    const empty = document.createElement("div");
+    empty.className = "devin-session-empty";
+    empty.textContent = state.sessions.length ? "没有匹配的会话" : "该账号没有会话";
+    listWrap.appendChild(empty);
+    return;
+  }
+  for (const session of filtered.slice(0, 100)) {
+    const row = document.createElement("div");
+    row.className = "devin-session-row";
+    const title = document.createElement("span");
+    title.className = "devin-session-title";
+    title.title = session.title;
+    title.textContent = session.status ? `${session.title} · ${session.status}` : session.title;
+    const open = document.createElement("button");
+    open.type = "button";
+    open.textContent = "打开(不换号)";
+    open.addEventListener("click", () => openIsolatedSession(session, state.auth));
+    const exportBtn = document.createElement("button");
+    exportBtn.type = "button";
+    exportBtn.textContent = "导出Handoff";
+    exportBtn.addEventListener("click", () => exportSessionFromList(session, state.auth));
+    row.append(title, open, exportBtn);
+    listWrap.appendChild(row);
+  }
+}
+
 function toolbarPhase(state) {
   const phase = document.getElementById("devin-exporter-phase");
   if (phase) phase.textContent = `状态：${state?.phase || "idle"}`;
@@ -1371,8 +1793,11 @@ function renderAccountRows() {
   if (!list) return;
   list.textContent = "";
   accountDraft.forEach((account, index) => {
+    const key = accountKey(account);
     const row = document.createElement("div");
     row.className = "devin-account-row";
+    const top = document.createElement("div");
+    top.className = "devin-account-top";
     const identity = document.createElement("div");
     identity.className = "devin-account-identity";
     const label = document.createElement("strong");
@@ -1381,48 +1806,55 @@ function renderAccountRows() {
     email.textContent = account.email;
     identity.append(label, email);
     const balance = document.createElement("span");
-    const balanceInfo = accountBalanceCache.get(String(account.email || "").trim().toLowerCase());
+    const balanceInfo = accountBalanceCache.get(key);
     balance.className = `devin-account-balance ${accountBalanceClass(balanceInfo)}`;
     balance.textContent = formatAccountBalance(balanceInfo);
-    const query = document.createElement("button");
-    query.type = "button";
-    query.textContent = "查余额";
-    query.addEventListener("click", () => queryAccountBalance(account));
-    const edit = document.createElement("button");
-    edit.type = "button";
-    edit.textContent = "编辑";
-    edit.addEventListener("click", () => {
-      accountBalanceCache.delete(String(account.email || "").trim().toLowerCase());
-      document.getElementById("devin-account-label").value = account.label || "";
-      document.getElementById("devin-account-email").value = account.email || "";
-      document.getElementById("devin-account-password").value = account.password || "";
-      editingAccountIndex = index;
-    });
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.textContent = "删除";
-    remove.addEventListener("click", () => {
-      accountBalanceCache.delete(String(account.email || "").trim().toLowerCase());
-      accountDraft.splice(index, 1);
-      renderAccountRows();
-    });
-    const up = document.createElement("button");
-    up.type = "button";
-    up.textContent = "上移";
-    up.disabled = index === 0;
-    up.addEventListener("click", () => {
+    top.append(identity, balance);
+
+    const actions = document.createElement("div");
+    actions.className = "devin-account-actions";
+    const makeButton = (text, handler, extraClass) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = text;
+      if (extraClass) button.className = extraClass;
+      button.addEventListener("click", handler);
+      return button;
+    };
+    const sessionsState = accountSessionsCache.get(key);
+    actions.append(
+      makeButton("查余额", () => queryAccountBalance(account)),
+      makeButton(sessionsState?.expanded ? "收起会话" : "会话", () => {
+        toggleAccountSessions(account).catch((error) => setToolbarStatus(error.message, true));
+      }),
+      makeButton("编辑", () => {
+        accountBalanceCache.delete(key);
+        document.getElementById("devin-account-label").value = account.label || "";
+        document.getElementById("devin-account-email").value = account.email || "";
+        document.getElementById("devin-account-password").value = account.password || "";
+        editingAccountIndex = index;
+      }),
+      makeButton("删除", () => {
+        accountBalanceCache.delete(key);
+        accountSessionsCache.delete(key);
+        accountDraft.splice(index, 1);
+        renderAccountRows();
+      })
+    );
+    const up = makeButton("↑", () => {
       [accountDraft[index - 1], accountDraft[index]] = [accountDraft[index], accountDraft[index - 1]];
       renderAccountRows();
     });
-    const down = document.createElement("button");
-    down.type = "button";
-    down.textContent = "下移";
-    down.disabled = index === accountDraft.length - 1;
-    down.addEventListener("click", () => {
+    up.disabled = index === 0;
+    const down = makeButton("↓", () => {
       [accountDraft[index], accountDraft[index + 1]] = [accountDraft[index + 1], accountDraft[index]];
       renderAccountRows();
     });
-    row.append(identity, balance, query, edit, remove, up, down);
+    down.disabled = index === accountDraft.length - 1;
+    actions.append(up, down);
+
+    row.append(top, actions);
+    renderAccountSessions(row, account);
     list.appendChild(row);
   });
 }
@@ -1560,8 +1992,8 @@ async function exportHandoffInPage() {
   }
   try {
     setToolbarStatus("正在导出 Handoff...");
-    const data = await exportHandoffForSwitch({ includeFullConversation: true });
-    const text = (await storageGet(["lastHandoff"])).lastHandoff.text;
+    const { data, compact, full } = await exportHandoffForSwitch({ includeFullConversation: true });
+    const text = full || compact;
     const link = document.createElement("a");
     link.href = `data:text/markdown;charset=utf-8,${encodeURIComponent(text)}`;
     link.download = `devin-handoff-${Date.now()}.md`;
@@ -1603,13 +2035,23 @@ function installToolbar() {
     .devin-settings-section{padding:13px 0;border-top:1px solid #29364b}
     .devin-settings-section:first-of-type{border-top:0;padding-top:10px}
     .devin-settings-actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:9px}
-    .devin-account-row{display:grid;grid-template-columns:minmax(120px,1fr) auto auto;gap:7px;align-items:center;margin:7px 0;padding:8px;border:1px solid #2d3b51;border-radius:10px;background:#182233}
-    .devin-account-identity{min-width:0;display:flex;flex-direction:column;gap:2px}
+    .devin-account-row{display:flex;flex-direction:column;gap:6px;margin:6px 0;padding:9px 10px;border:1px solid #2d3b51;border-radius:10px;background:#182233}
+    .devin-account-top{display:flex;gap:8px;align-items:center;justify-content:space-between}
+    .devin-account-identity{min-width:0;display:flex;flex-direction:column;gap:1px}
     .devin-account-identity strong{overflow:hidden;color:#e7edf8;text-overflow:ellipsis;white-space:nowrap}
-    .devin-account-identity span{overflow:hidden;color:#8797b0;text-overflow:ellipsis;white-space:nowrap}
-    .devin-account-balance{grid-column:1 / -1;font-size:12px;color:#aebbd0}
+    .devin-account-identity span{overflow:hidden;font-size:11px;color:#8797b0;text-overflow:ellipsis;white-space:nowrap}
+    .devin-account-balance{flex:none;font-size:12px;color:#aebbd0;white-space:nowrap}
     .devin-account-balance-negative,.devin-account-balance-error{color:#ffadb5}
     .devin-account-balance-positive{color:#9be0b6}
+    .devin-account-actions{display:flex;flex-wrap:wrap;gap:5px}
+    .devin-account-actions button{padding:4px 8px;font-size:12px}
+    .devin-account-sessions{margin-top:4px;padding:8px;border:1px solid #29364b;border-radius:8px;background:#0f1826}
+    .devin-session-filter{margin:0 0 7px}
+    .devin-session-list{display:flex;flex-direction:column;gap:5px;max-height:230px;overflow:auto}
+    .devin-session-row{display:flex;gap:6px;align-items:center;padding:4px 2px}
+    .devin-session-title{flex:1;min-width:0;overflow:hidden;font-size:12px;color:#cdd8ea;text-overflow:ellipsis;white-space:nowrap}
+    .devin-session-row button{padding:3px 7px;font-size:11px;white-space:nowrap}
+    .devin-session-empty{padding:4px 2px;font-size:12px;color:#8797b0}
   `;
   document.documentElement.appendChild(style);
   const toolbar = document.createElement("div");
@@ -1763,12 +2205,21 @@ if (typeof module !== "undefined") {
     buildMessages,
     buildWorklog,
     buildHandoff,
+    collapseNoise,
+    summarizeAttachmentMarkers,
+    inlineAttachmentsInText,
+    summarizeTodos,
     buildContinuationText,
     applyHandoff,
     buildUsageLimitBody,
     formatBalanceDisplay,
     parseBatchAccounts,
+    parseAccountLine,
+    normalizeAccountObject,
     mergeBatchAccounts,
+    normalizeSessionRecord,
+    buildVauthPayload,
+    buildIsolatedSessionUrl,
     selectNextAccount,
     routeAutoSwitch
   };
