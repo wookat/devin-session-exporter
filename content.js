@@ -1645,7 +1645,8 @@ async function createContinuationSession(state) {
     phase: "done",
     completedAt: new Date().toISOString()
   });
-  setToolbarStatus(shouldSend ? "已发送续接提示" : "已填入续接提示");
+  const switched = state.targetEmail ? `已切换到 ${state.targetEmail}` : "已切换账号";
+  setToolbarStatus(shouldSend ? `${switched}，并已发送续接提示` : `${switched}，已填入续接提示`);
 }
 
 async function exportHandoffForSwitch(options = {}) {
@@ -1689,6 +1690,7 @@ async function beginAutoSwitch(manual = false) {
     setToolbarStatus(`没有余额 > $${minBalance} 的可切换账号`, true);
     return;
   }
+  setToolbarStatus(`将切换到 ${next.email} ...`);
   if (isSessionPage()) {
     await exportHandoffForSwitch();
   }
@@ -1701,6 +1703,38 @@ async function beginAutoSwitch(manual = false) {
   };
   await saveAutoSwitchState(state);
   await driveLogout(state);
+}
+
+async function beginSwitchToAccount(email) {
+  const target = String(email || "").trim();
+  if (!target) {
+    setToolbarStatus("目标账号邮箱为空", true);
+    return;
+  }
+  const accounts = await loadManagedAccounts();
+  const account = accounts.find((item) => (
+    item && typeof item.email === "string" && item.email.trim().toLowerCase() === target.toLowerCase()
+  ));
+  if (!account || !account.password) {
+    setToolbarStatus("该账号缺少密码，无法切换（请先在文本框补全后重新添加）", true);
+    return;
+  }
+  if (account.email.trim().toLowerCase() === currentAccountEmail().trim().toLowerCase()) {
+    setToolbarStatus(`当前已是 ${account.email}`, true);
+    return;
+  }
+  setToolbarStatus(`正在切换到 ${account.email} ...`);
+  if (isSessionPage()) {
+    await exportHandoffForSwitch();
+  }
+  await saveAutoSwitchState({
+    phase: "loggingOut",
+    targetEmail: account.email,
+    startedAt: new Date().toISOString(),
+    attempts: 0,
+    manual: true
+  });
+  await driveLogout({ phase: "loggingOut", targetEmail: account.email });
 }
 
 function isSessionPage() {
@@ -2519,6 +2553,9 @@ function renderAccountRows() {
     actions.className = "devin-account-actions";
     const sessionsState = accountSessionsCache.get(key);
     actions.append(
+      createButton("切到此号", () => {
+        beginSwitchToAccount(account.email).catch((error) => setToolbarStatus(error.message, true));
+      }, "devin-account-switch"),
       createButton("刷新", () => {
         refreshAccountMeta(account).catch((error) => setToolbarStatus(error.message, true));
       }),
@@ -2871,6 +2908,7 @@ function installToolbar() {
     .devin-account-status{flex:none;color:#aab3c1}
     .devin-account-actions{display:flex;flex-wrap:wrap;gap:5px;padding-left:26px}
     .devin-account-actions button{padding:4px 9px;font-size:12px;background:#1e242e}
+    .devin-account-actions button.devin-account-switch{background:#264b8a;color:#dce7ff;font-weight:600}
     .devin-account-sessions{margin-top:4px;padding:8px;border-radius:8px;background:#0d1117}
     .devin-session-filter{margin:0 0 7px}
     .devin-session-list{display:flex;flex-direction:column;gap:4px;max-height:230px;overflow:auto}
