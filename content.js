@@ -357,14 +357,71 @@ async function extractConversation(options = {}) {
   };
 }
 
-const DEFAULT_HANDOFF_TEMPLATE = `请先接入并检查我的远程 GPU 集群，不要自行选择项目或开始训练。
+const DEFAULT_HANDOFF_TEMPLATE = `你现在需要接入并使用我的远程 GPU 集群。当前阶段不要自行选择项目，也不要运行训练；先完成连接、了解集群使用方法，然后等待我提供具体任务。
 
-连接主服务器：
-ssh dell@xu-1
+【接入方式】
 
-项目和证据保存在 ~/wookat；请把重要材料保存在 xu-1。先进行只读检查，等待我提供具体任务。
+1. 检查 Tailscale：
+   tailscale status
+
+2. 如果没有安装：
+   curl -fsSL https://tailscale.com/install.sh | sh
+
+3. 需要 Tailscale auth key 时向我索取。不要把密钥保存到代码、脚本、日志或文档中。
+
+4. 接入后连接主服务器：
+   ssh dell@xu-1
+
+5. 如果出现 Tailscale Check 授权链接，把完整链接发给我，等待我放行。
+
+【集群结构】
+
+- xu-1：统一入口、代码和实验产物的长期存储节点，也可以参与训练；
+- xu-2、xu-3、xu-4：训练节点；
+- temp-www、temp-lx：可参与调度的临时训练节点；
+- temp-hb：禁止加入自动调度，只能在我明确要求时单独连接使用。
+
+已经配置从 xu-1 到训练节点的免交互 SSH。连接 xu-1 后，正常情况下不需要再次向我索取其他节点的密码或授权。
+
+集群使用轻量 SSH GPU 调度器 \`sgpu\`，不使用 SLURM。登录 xu-1 后，先查找并阅读现有的 sgpu 帮助、配置和使用说明，例如：
+
+sgpu --help
+
+如果命令不在 PATH 中，请在不修改系统环境的前提下查找其实际位置、README 或管理脚本。不要重新安装、重写或替换现有调度器。
+
+【使用规则】
+
+1. GPU 训练任务优先通过 sgpu 提交，不要直接登录节点抢占 GPU。
+2. 提交前检查节点、GPU、运行任务和排队任务状态。
+3. 不要重复提交已经运行或排队的任务。
+4. 不要停止、修改或干扰其他用户及其他项目的任务。
+5. 不要让前台 SSH 会话承载长时间训练；任务应在 Devin 断开后继续运行。
+6. 代码可以从 xu-1 同步到计算节点，但训练节点不能作为唯一存储位置。
+7. 日志、指标、结果、checkpoint 和重要权重必须回传 xu-1。
+8. 不清理 temp-* 上的任何文件。
+9. 不修改服务器现有的 Python、Conda、CUDA、驱动或系统环境。
+10. temp-hb 不得通过 sgpu 使用，除非我明确要求人工单独连接它。
+
+【完成接入后的汇报】
+
+先进行只读检查，然后告诉我：
+
+- Tailscale 和 xu-1 是否连接成功；
+- sgpu 的实际位置和基本调用方式；
+- 当前可调度节点；
+- 各节点当前是否在线以及 GPU 是否空闲；
+- 当前运行和排队中的任务；
+- 如何提交、查看日志、取消任务和取回结果；
+- 你准备使用的标准提交命令模板。
+
+当前只检查和学习，不提交训练、不取消任务、不修改配置。完成汇报后等待我提供项目目录和训练命令。
+
+项目创建在~/wookat下面，所有证据和材料都需要保证到xu-1服务器上，当前设备作为临时的，随时可能切换到新的设备新的会话继续完成任务。
 
 【上一会话的上下文（用于续接）】
+
+以下是上一个会话导出的交接信息。接入 xu-1 后，请先阅读 ~/wookat 下的项目目录与已保存的证据/材料，再结合下面的上下文继续未完成的任务；若与「等待我提供任务」冲突，以继续未完成任务为准。
+
 {{HANDOFF}}
 `;
 
@@ -683,17 +740,13 @@ function isQuotaExceeded() {
   return /usage quota exceeded|usage quota has been exceeded|out of on-demand usage|ran out of free credits/i.test(text);
 }
 
-function visibleButtons() {
-  return [...document.querySelectorAll("button")].filter((button) => {
-    const style = getComputedStyle(button);
-    return style.display !== "none" && style.visibility !== "hidden";
-  });
-}
-
 function clickButtonContaining(text) {
-  const target = visibleButtons().find((button) => (
-    (button.innerText || button.textContent || "").trim().toLowerCase().includes(text.toLowerCase())
-  ));
+  const target = [...document.querySelectorAll("button")].find((button) => {
+    const style = getComputedStyle(button);
+    return style.display !== "none"
+      && style.visibility !== "hidden"
+      && (button.innerText || button.textContent || "").trim().toLowerCase().includes(text.toLowerCase());
+  });
   if (!target) return false;
   target.click();
   return true;
@@ -811,28 +864,6 @@ async function waitForElement(getElement, timeout = 12000, interval = 300) {
 
 async function driveLogout(state) {
   if (state.lastActionAt && Date.now() - state.lastActionAt < 1500) return;
-  const currentEmail = currentAccountEmail();
-  const accountButton = visibleButtons().find((button) => {
-    const text = (button.innerText || button.textContent || "").toLowerCase();
-    return (currentEmail && text.includes(currentEmail.toLowerCase()))
-      || /account|profile|organization|org/i.test(button.getAttribute("aria-label") || "");
-  }) || visibleButtons().find((button) => {
-    const text = (button.innerText || button.textContent || "").trim();
-    return text.length > 0 && text.length < 80;
-  });
-  if (!accountButton) {
-    await abortAutoSwitch("找不到账号菜单，自动换号已停止");
-    return;
-  }
-  accountButton.click();
-  const logout = await waitForElement(() => visibleButtons().find((button) => (
-    /log out|退出登录/i.test(button.innerText || button.textContent || "")
-  )), 5000);
-  if (!logout) {
-    await abortAutoSwitch("找不到 Log out 按钮，自动换号已停止");
-    return;
-  }
-  logout.click();
   await saveAutoSwitchState({
     ...state,
     phase: "loggingIn",
@@ -841,11 +872,7 @@ async function driveLogout(state) {
     attempts: (state.attempts || 0) + 1
   });
   setToolbarStatus("正在切换账号...");
-  setTimeout(() => {
-    if (location.hostname === "app.devin.ai") {
-      location.href = "https://app.devin.ai/auth/login?redirect=%2F";
-    }
-  }, 1200);
+  location.href = "https://app.devin.ai/logout";
 }
 
 async function driveLogin(state) {
