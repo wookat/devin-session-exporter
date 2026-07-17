@@ -212,6 +212,4 @@ const formatters = {
   text: toText
 };
 
-if (typeof module !== "undefined") {
-  module.exports = { toMarkdown, toJSON, toText, formatters };
-}
+export { toMarkdown, toJSON, toText, formatters };

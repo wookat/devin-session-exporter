@@ -1384,28 +1384,29 @@ function clickSendButton() {
 
 let toolbarStatusTimer = null;
 function setToolbarStatus(message, isError = false) {
-  const element = document.getElementById("devin-exporter-status");
-  if (!element) return;
-  element.textContent = message;
-  element.dataset.error = isError ? "true" : "false";
+  statusMessage = message || "";
+  statusIsError = isError === true;
+  emit();
   if (toolbarStatusTimer) {
     clearTimeout(toolbarStatusTimer);
     toolbarStatusTimer = null;
   }
   // Keep errors visible; transient success/progress notices clear themselves so
   // the floating bar does not permanently display account chatter.
-  if (message && !isError) {
+  if (message && !isError && typeof setTimeout === "function") {
     toolbarStatusTimer = setTimeout(() => {
-      const current = document.getElementById("devin-exporter-status");
-      if (current && current.dataset.error !== "true") current.textContent = "";
+      if (!statusIsError) {
+        statusMessage = "";
+        emit();
+      }
     }, 4000);
   }
 }
 
 async function saveAutoSwitchState(state) {
   await storageSet({ autoSwitchState: state });
-  const phase = document.getElementById("devin-exporter-phase");
-  if (phase) phase.textContent = `状态：${state.phase || "idle"}`;
+  currentPhase = state?.phase || "idle";
+  emit();
 }
 
 function loginErrorVisible() {
@@ -2054,15 +2055,6 @@ function accountKey(account) {
   return String(account?.email || "").trim().toLowerCase();
 }
 
-function createButton(text, handler, className) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.textContent = text;
-  if (className) button.className = className;
-  if (handler) button.addEventListener("click", handler);
-  return button;
-}
-
 function pickLatestSession(sessions) {
   if (!Array.isArray(sessions) || !sessions.length) return null;
   const time = (session) => {
@@ -2195,10 +2187,8 @@ async function deleteSelectedAccounts() {
   });
   selectedAccountKeys.clear();
   renderAccountRows();
-  const panel = document.getElementById("devin-exporter-settings");
-  const encrypted = panel?.querySelector("#devin-encrypt-accounts")?.checked === true;
   try {
-    await saveManagedAccounts(accountDraft, encrypted);
+    await saveManagedAccounts(accountDraft, encryptionEnabled);
     await Promise.all([persistBalances(), persistLatestSessions()]);
     setToolbarStatus(`已删除 ${removed} 个账号`);
   } catch (error) {
@@ -2241,95 +2231,11 @@ async function openLatestSession(account, session) {
   setToolbarStatus(`已打开：${session.title}`);
 }
 
-async function exportSessionFromList(session, auth, button) {
-  setButtonLoading(button, true);
-  try {
-    setToolbarStatus(`正在导出会话 Handoff：${session.title}...`);
-    const text = await exportListedSessionHandoff(session, auth);
-    const link = document.createElement("a");
-    link.href = `data:text/markdown;charset=utf-8,${encodeURIComponent(text)}`;
-    link.download = `devin-handoff-${session.sessionId.slice(0, 12)}-${fileDateStamp()}.md`;
-    link.click();
-    setToolbarStatus(`已导出会话：${session.title}`);
-  } catch (error) {
-    setToolbarStatus(error.message || "会话 Handoff 导出失败", true);
-  } finally {
-    setButtonLoading(button, false);
-  }
-}
-
-function renderAccountSessions(container, account) {
-  const key = accountKey(account);
-  const state = accountSessionsCache.get(key);
-  if (!state || !state.expanded) return;
-  const panel = document.createElement("div");
-  panel.className = "devin-account-sessions";
-  if (state.loading) {
-    panel.textContent = "正在读取会话列表…";
-    container.appendChild(panel);
-    return;
-  }
-  if (state.error) {
-    panel.className = "devin-account-sessions devin-account-balance-error";
-    panel.textContent = state.error;
-    container.appendChild(panel);
-    return;
-  }
-  const search = document.createElement("input");
-  search.type = "search";
-  search.className = "devin-session-filter";
-  search.placeholder = `搜索 ${state.sessions.length} 个会话…`;
-  search.value = state.filter || "";
-  search.addEventListener("input", () => {
-    state.filter = search.value;
-    accountSessionsCache.set(key, state);
-    renderAccountSessionsList(listWrap, account, state);
-  });
-  panel.appendChild(search);
-  const listWrap = document.createElement("div");
-  listWrap.className = "devin-session-list";
-  panel.appendChild(listWrap);
-  container.appendChild(panel);
-  renderAccountSessionsList(listWrap, account, state);
-}
-
-function renderAccountSessionsList(listWrap, account, state) {
-  listWrap.textContent = "";
-  const needle = String(state.filter || "").trim().toLowerCase();
-  const filtered = state.sessions.filter((session) => {
-    if (!needle) return true;
-    return `${session.title} ${session.sessionId}`.toLowerCase().includes(needle);
-  });
-  if (!filtered.length) {
-    const empty = document.createElement("div");
-    empty.className = "devin-session-empty";
-    empty.textContent = state.sessions.length ? "没有匹配的会话" : "该账号没有会话";
-    listWrap.appendChild(empty);
-    return;
-  }
-  for (const session of filtered.slice(0, 100)) {
-    const row = document.createElement("div");
-    row.className = "devin-session-row";
-    const title = document.createElement("span");
-    title.className = "devin-session-title";
-    title.title = session.title;
-    title.textContent = session.status ? `${session.title} · ${session.status}` : session.title;
-    const open = document.createElement("button");
-    open.type = "button";
-    open.textContent = "打开(不换号)";
-    open.addEventListener("click", () => openIsolatedSession(session, state.auth));
-    const exportBtn = document.createElement("button");
-    exportBtn.type = "button";
-    exportBtn.textContent = "导出Handoff";
-    exportBtn.addEventListener("click", () => exportSessionFromList(session, state.auth, exportBtn));
-    row.append(title, open, exportBtn);
-    listWrap.appendChild(row);
-  }
-}
-
-function toolbarPhase(state) {
-  const phase = document.getElementById("devin-exporter-phase");
-  if (phase) phase.textContent = `状态：${state?.phase || "idle"}`;
+async function exportSessionHandoff(session, auth) {
+  setToolbarStatus(`正在导出会话 Handoff：${session.title}...`);
+  const text = await exportListedSessionHandoff(session, auth);
+  setToolbarStatus(`已导出会话：${session.title}`);
+  return text;
 }
 
 function formatLatestSession(info) {
@@ -2338,42 +2244,6 @@ function formatLatestSession(info) {
   if (info.error) return `最新会话：${info.error}`;
   if (!info.session) return "最新会话：无";
   return `最新会话：${info.session.title} · ${formatSessionStatus(info.session.status)}`;
-}
-
-function renderAccountBatchBar(list) {
-  const total = accountDraft.length;
-  const selected = accountDraft.filter((account) => selectedAccountKeys.has(accountKey(account))).length;
-  const bar = document.createElement("div");
-  bar.className = "devin-account-batchbar";
-
-  const selectAllLabel = document.createElement("label");
-  selectAllLabel.className = "devin-batch-selectall";
-  const selectAll = document.createElement("input");
-  selectAll.type = "checkbox";
-  selectAll.checked = total > 0 && selected === total;
-  selectAll.indeterminate = selected > 0 && selected < total;
-  selectAll.addEventListener("change", () => {
-    selectedAccountKeys.clear();
-    if (selectAll.checked) accountDraft.forEach((account) => selectedAccountKeys.add(accountKey(account)));
-    renderAccountRows();
-  });
-  const selectAllText = document.createElement("span");
-  selectAllText.textContent = selected ? `已选 ${selected}/${total}` : `共 ${total} 个账号`;
-  selectAllLabel.append(selectAll, selectAllText);
-
-  const refresh = createButton(selected ? "刷新选中余额" : "刷新全部余额", () => {
-    const targets = selected
-      ? accountDraft.filter((account) => selectedAccountKeys.has(accountKey(account)))
-      : accountDraft.slice();
-    refreshAccountsMeta(targets).catch((error) => setToolbarStatus(error.message, true));
-  });
-  const del = createButton("删除选中", () => {
-    deleteSelectedAccounts().catch((error) => setToolbarStatus(error.message, true));
-  });
-  del.disabled = !selected;
-
-  bar.append(selectAllLabel, refresh, del);
-  list.appendChild(bar);
 }
 
 const PROMPT_SNIPPETS_KEY = "promptSnippets";
@@ -2426,265 +2296,111 @@ async function copyToClipboard(text) {
 }
 
 function renderPromptSnippets() {
-  const list = document.getElementById("devin-snippet-list");
-  if (!list) return;
-  list.textContent = "";
-  if (!promptSnippets.length) {
-    const empty = document.createElement("div");
-    empty.className = "devin-account-empty";
-    empty.textContent = "还没有提示词，在下方添加。";
-    list.appendChild(empty);
-    return;
-  }
-  promptSnippets.forEach((snippet, index) => {
-    const row = document.createElement("div");
-    row.className = "devin-snippet-row";
-    const title = document.createElement("span");
-    title.className = "devin-snippet-title";
-    title.textContent = snippet.title || snippet.text.slice(0, 24);
-    title.title = snippet.text;
-    const copy = createButton("复制", async () => {
-      const ok = await copyToClipboard(snippet.text);
-      setToolbarStatus(ok ? "已复制到剪贴板" : "复制失败，请手动复制", !ok);
-    });
-    const remove = createButton("删除", () => {
-      promptSnippets.splice(index, 1);
-      savePromptSnippets();
-      renderPromptSnippets();
-    });
-    row.append(title, copy, remove);
-    list.appendChild(row);
-  });
+  emit();
 }
 
-function addPromptSnippetFromPanel() {
-  const titleInput = document.getElementById("devin-snippet-title");
-  const textInput = document.getElementById("devin-snippet-text");
-  const text = String(textInput?.value || "").trim();
-  if (!text) {
+async function copySnippetToClipboard(text) {
+  const ok = await copyToClipboard(text);
+  setToolbarStatus(ok ? "已复制到剪贴板" : "复制失败，请手动复制", !ok);
+  return ok;
+}
+
+async function addPromptSnippet(title, text) {
+  const body = String(text || "").trim();
+  if (!body) {
     setToolbarStatus("提示词内容不能为空", true);
-    return;
+    return false;
   }
-  const title = String(titleInput?.value || "").trim() || text.slice(0, 24);
-  promptSnippets.push({ title, text });
-  savePromptSnippets();
-  if (titleInput) titleInput.value = "";
-  if (textInput) textInput.value = "";
-  renderPromptSnippets();
+  const label = String(title || "").trim() || body.slice(0, 24);
+  promptSnippets.push({ title: label, text: body });
+  await savePromptSnippets();
+  emit();
   setToolbarStatus("已保存提示词");
+  return true;
+}
+
+async function removePromptSnippet(index) {
+  if (index < 0 || index >= promptSnippets.length) return;
+  promptSnippets.splice(index, 1);
+  await savePromptSnippets();
+  emit();
 }
 
 function renderAccountRows() {
-  const list = document.getElementById("devin-account-list");
-  if (!list) return;
-  list.textContent = "";
-  if (!accountDraft.length) {
-    const empty = document.createElement("div");
-    empty.className = "devin-account-empty";
-    empty.textContent = "还没有账号，在下方文本框添加。";
-    list.appendChild(empty);
-    return;
-  }
-  renderAccountBatchBar(list);
-  accountDraft.forEach((account, index) => {
-    const key = accountKey(account);
-    const row = document.createElement("div");
-    row.className = account.archived ? "devin-account-row devin-account-archived" : "devin-account-row";
-
-    const main = document.createElement("div");
-    main.className = "devin-account-main";
-    const select = document.createElement("input");
-    select.type = "checkbox";
-    select.className = "devin-account-select";
-    select.checked = selectedAccountKeys.has(key);
-    select.addEventListener("change", () => {
-      if (select.checked) selectedAccountKeys.add(key);
-      else selectedAccountKeys.delete(key);
-      renderAccountRows();
-    });
-    const identity = document.createElement("div");
-    identity.className = "devin-account-identity";
-    const name = document.createElement("strong");
-    name.textContent = `${index + 1}. ${account.label || account.email}`;
-    name.title = account.email;
-    identity.appendChild(name);
-    if (account.archived) {
-      const badge = document.createElement("span");
-      badge.className = "devin-account-badge";
-      badge.textContent = "已归档";
-      identity.appendChild(badge);
-    }
-    if (account.label && account.label !== account.email) {
-      const email = document.createElement("span");
-      email.textContent = account.email;
-      identity.appendChild(email);
-    }
-    const balance = document.createElement("span");
-    const balanceInfo = accountBalanceCache.get(key);
-    balance.className = `devin-account-balance ${accountBalanceClass(balanceInfo)}`;
-    balance.textContent = formatAccountBalance(balanceInfo);
-    main.append(select, identity, balance);
-
-    const meta = document.createElement("div");
-    meta.className = "devin-account-meta";
-    const latest = accountLatestCache.get(key);
-    if (latest && latest.session && latest.session.sessionId) {
-      const label = document.createElement("span");
-      label.className = "devin-account-meta-label";
-      label.textContent = "最新会话：";
-      const link = document.createElement("a");
-      link.href = "#";
-      link.className = "devin-account-latest-link";
-      link.title = latest.session.title || "点击打开该会话（不换号）";
-      link.textContent = latest.session.title || latest.session.sessionId;
-      link.addEventListener("click", (event) => {
-        event.preventDefault();
-        openLatestSession(account, latest.session).catch((error) => setToolbarStatus(error.message, true));
-      });
-      const status = document.createElement("span");
-      status.className = "devin-account-status";
-      status.textContent = `${sessionStatusIcon(latest.session.status)} ${formatSessionStatus(latest.session.status)}`;
-      meta.append(label, link, status);
-    } else {
-      meta.textContent = formatLatestSession(latest);
-    }
-
-    const actions = document.createElement("div");
-    actions.className = "devin-account-actions";
-    const sessionsState = accountSessionsCache.get(key);
-    actions.append(
-      createButton("切到此号", () => {
-        beginSwitchToAccount(account.email).catch((error) => setToolbarStatus(error.message, true));
-      }, "devin-account-switch"),
-      createButton("刷新", () => {
-        refreshAccountMeta(account).catch((error) => setToolbarStatus(error.message, true));
-      }),
-      createButton(sessionsState?.expanded ? "收起会话" : "会话", () => {
-        toggleAccountSessions(account).catch((error) => setToolbarStatus(error.message, true));
-      }),
-      createButton("编辑", () => {
-        const textarea = document.getElementById("devin-batch-accounts");
-        if (textarea) {
-          const parts = [account.email || "", account.password || ""];
-          if (account.label && account.label !== account.email) parts.push(account.label);
-          textarea.value = parts.join("---");
-          textarea.focus();
-        }
-        setToolbarStatus("已填入文本框，修改后点「添加账号」按相同邮箱更新");
-      }),
-      createButton(account.archived ? "取消归档" : "归档", async () => {
-        account.archived = !account.archived;
-        try {
-          await saveManagedAccounts(accountDraft, document.getElementById("devin-encrypt-accounts")?.checked === true);
-          setToolbarStatus(account.archived ? "已归档（仍保存、可查看，不参与自动换号）" : "已取消归档");
-        } catch (error) {
-          setToolbarStatus(error.message, true);
-        }
-        renderAccountRows();
-      }),
-      createButton("删除", () => {
-        selectedAccountKeys.add(key);
-        deleteSelectedAccounts().catch((error) => setToolbarStatus(error.message, true));
-      })
-    );
-    const up = createButton("↑", () => {
-      [accountDraft[index - 1], accountDraft[index]] = [accountDraft[index], accountDraft[index - 1]];
-      renderAccountRows();
-    });
-    up.disabled = index === 0;
-    const down = createButton("↓", () => {
-      [accountDraft[index], accountDraft[index + 1]] = [accountDraft[index + 1], accountDraft[index]];
-      renderAccountRows();
-    });
-    down.disabled = index === accountDraft.length - 1;
-    actions.append(up, down);
-
-    row.append(main, meta, actions);
-    renderAccountSessions(row, account);
-    list.appendChild(row);
-  });
+  emit();
 }
 
-async function openSettingsPanel() {
-  const panel = document.getElementById("devin-exporter-settings");
-  if (!panel) return;
+function toggleAccountSelect(key) {
+  if (selectedAccountKeys.has(key)) selectedAccountKeys.delete(key);
+  else selectedAccountKeys.add(key);
+  emit();
+}
+
+function setAllAccountsSelected(checked) {
+  selectedAccountKeys.clear();
+  if (checked) accountDraft.forEach((account) => selectedAccountKeys.add(accountKey(account)));
+  emit();
+}
+
+function moveAccount(index, direction) {
+  const target = index + direction;
+  if (index < 0 || target < 0 || index >= accountDraft.length || target >= accountDraft.length) return;
+  [accountDraft[index], accountDraft[target]] = [accountDraft[target], accountDraft[index]];
+  emit();
+}
+
+// The batch textarea prefilled for editing a saved account (email---password[---label]).
+function accountEditText(account) {
+  const parts = [account.email || "", account.password || ""];
+  if (account.label && account.label !== account.email) parts.push(account.label);
+  return parts.join("---");
+}
+
+async function toggleAccountArchive(index) {
+  const account = accountDraft[index];
+  if (!account) return;
+  account.archived = !account.archived;
+  emit();
   try {
-    accountDraft = await loadManagedAccounts();
-    const values = await storageGet([
-      "accountEncryptionEnabled",
-      "autoSwitchEnabled",
-      "autoSendContinuation",
-      "targetUsageLimit",
-      "switchMinBalance"
-    ]);
-    panel.querySelector("#devin-encrypt-accounts").checked = values.accountEncryptionEnabled === true;
-    panel.querySelector("#devin-auto-switch").checked = values.autoSwitchEnabled === true;
-    panel.querySelector("#devin-auto-send").checked = values.autoSendContinuation !== false;
-    panel.querySelector("#devin-target-limit").value = Number.isFinite(Number(values.targetUsageLimit))
-      ? Number(values.targetUsageLimit)
-      : DEFAULT_TARGET_USAGE_LIMIT;
-    panel.querySelector("#devin-switch-min-balance").value = Number.isFinite(Number(values.switchMinBalance))
-      ? Number(values.switchMinBalance)
-      : DEFAULT_SWITCH_MIN_BALANCE;
-    selectedAccountKeys.clear();
-    await Promise.all([loadPersistedBalances(), loadPersistedLatestSessions(), loadPromptSnippets()]);
-    renderAccountRows();
-    renderPromptSnippets();
-    panel.hidden = false;
-    renderUpdateNotice();
-    checkForUpdate().catch(() => {});
-    refreshCurrentAccount().catch((error) => setToolbarStatus(error.message, true));
-    refreshStaleAccountMeta()
-      .then(() => refreshCurrentAccount())
-      .catch((error) => setToolbarStatus(error.message, true));
+    await saveManagedAccounts(accountDraft, encryptionEnabled);
+    setToolbarStatus(account.archived ? "已归档（仍保存、可查看，不参与自动换号）" : "已取消归档");
   } catch (error) {
     setToolbarStatus(error.message, true);
   }
 }
 
-async function saveSettingsPanel() {
-  const panel = document.getElementById("devin-exporter-settings");
-  if (!panel) return;
-  const encrypted = panel.querySelector("#devin-encrypt-accounts").checked;
-  const targetUsageLimit = readTargetUsageLimit(panel);
-  const switchMinBalance = readSwitchMinBalance(panel);
-  await saveManagedAccounts(accountDraft, encrypted);
-  await storageSet({
-    autoSwitchEnabled: panel.querySelector("#devin-auto-switch").checked,
-    autoSendContinuation: panel.querySelector("#devin-auto-send").checked,
-    targetUsageLimit,
-    switchMinBalance
-  });
-  panel.hidden = true;
-  setToolbarStatus("账号设置已保存");
+function deleteAccount(key) {
+  selectedAccountKeys.add(key);
+  return deleteSelectedAccounts();
 }
 
-async function addBatchAccountsFromPanel() {
-  const panel = document.getElementById("devin-exporter-settings");
-  if (!panel) return;
-  const textarea = panel.querySelector("#devin-batch-accounts");
-  if (!textarea.value.trim()) {
+async function refreshAccountsBalances(onlySelected) {
+  const targets = onlySelected
+    ? accountDraft.filter((account) => selectedAccountKeys.has(accountKey(account)))
+    : accountDraft.slice();
+  await refreshAccountsMeta(targets);
+}
+
+async function addBatchAccounts(text) {
+  const raw = String(text || "");
+  if (!raw.trim()) {
     setToolbarStatus("请先在文本框填入账号（每行一个）", true);
-    return;
+    return false;
   }
   const before = new Set(accountDraft.map((account) => accountKey(account)));
-  const result = mergeBatchAccounts(accountDraft, textarea.value);
+  const result = mergeBatchAccounts(accountDraft, raw);
   accountDraft = result.accounts;
   const added = accountDraft.filter((account) => !before.has(accountKey(account)));
   for (const account of added) {
     accountBalanceCache.delete(accountKey(account));
     accountLatestCache.delete(accountKey(account));
   }
-  textarea.value = "";
-  renderAccountRows();
+  emit();
   try {
-    await saveManagedAccounts(
-      accountDraft,
-      panel.querySelector("#devin-encrypt-accounts").checked
-    );
+    await saveManagedAccounts(accountDraft, encryptionEnabled);
   } catch (error) {
     setToolbarStatus(error.message || "保存账号失败", true);
-    return;
+    return false;
   }
   setToolbarStatus(`已添加/更新 ${result.addedOrUpdated} 个账号，跳过 ${result.skipped} 行，正在查询余额...`);
   const target = await readTargetUsageLimitSafe();
@@ -2693,33 +2409,38 @@ async function addBatchAccountsFromPanel() {
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
   setToolbarStatus(`已添加/更新 ${result.addedOrUpdated} 个账号，余额与上限($${target})已就绪`);
+  return true;
 }
 
-function readTargetUsageLimit(panel) {
-  const raw = panel.querySelector("#devin-target-limit").value;
-  if (String(raw).trim() === "") return DEFAULT_TARGET_USAGE_LIMIT;
+function validateLimit(raw, fallback, label) {
+  if (raw == null || String(raw).trim() === "") return fallback;
   const value = Number(raw);
   if (!Number.isFinite(value) || value < 0) {
-    throw new Error("消息用量上限必须是非负数字");
+    throw new Error(`${label}必须是非负数字`);
   }
   return value;
 }
 
-function readSwitchMinBalance(panel) {
-  const raw = panel.querySelector("#devin-switch-min-balance").value;
-  if (String(raw).trim() === "") return DEFAULT_SWITCH_MIN_BALANCE;
-  const value = Number(raw);
-  if (!Number.isFinite(value) || value < 0) {
-    throw new Error("最低余额必须是非负数字");
-  }
-  return value;
+async function saveSettings(settings = {}) {
+  const targetUsageLimit = validateLimit(settings.targetUsageLimit, DEFAULT_TARGET_USAGE_LIMIT, "消息用量上限");
+  const switchMinBalance = validateLimit(settings.switchMinBalance, DEFAULT_SWITCH_MIN_BALANCE, "最低余额");
+  encryptionEnabled = settings.encryptionEnabled === true;
+  await saveManagedAccounts(accountDraft, encryptionEnabled);
+  await storageSet({
+    autoSwitchEnabled: settings.autoSwitchEnabled === true,
+    autoSendContinuation: settings.autoSendContinuation !== false,
+    targetUsageLimit,
+    switchMinBalance,
+    continuationTemplate: typeof settings.continuationTemplate === "string"
+      ? settings.continuationTemplate
+      : DEFAULT_HANDOFF_TEMPLATE
+  });
+  setToolbarStatus("账号设置已保存");
 }
 
-async function applyTargetUsageLimit() {
-  const panel = document.getElementById("devin-exporter-settings");
-  if (!panel) return;
+async function applyTargetUsageLimit(rawTarget) {
   try {
-    const target = readTargetUsageLimit(panel);
+    const target = validateLimit(rawTarget, DEFAULT_TARGET_USAGE_LIMIT, "消息用量上限");
     await setUsageLimit(target);
     await storageSet({ targetUsageLimit: target });
     await refreshBalanceDisplay();
@@ -2729,38 +2450,56 @@ async function applyTargetUsageLimit() {
   }
 }
 
-function setButtonLoading(button, loading) {
-  if (!button) return;
-  if (loading) {
-    button.classList.add("is-loading");
-    button.disabled = true;
-  } else {
-    button.classList.remove("is-loading");
-    button.disabled = false;
-  }
+function setEncryptionEnabled(value) {
+  encryptionEnabled = value === true;
+  emit();
 }
 
-async function exportHandoffInPage() {
+// Loads persisted state for the settings panel and returns the values React
+// needs to hydrate its controlled form. Kicks off background refreshes too.
+async function loadSettingsState() {
+  accountDraft = await loadManagedAccounts();
+  const values = await storageGet([
+    "accountEncryptionEnabled",
+    "autoSwitchEnabled",
+    "autoSendContinuation",
+    "targetUsageLimit",
+    "switchMinBalance",
+    "continuationTemplate"
+  ]);
+  encryptionEnabled = values.accountEncryptionEnabled === true;
+  selectedAccountKeys.clear();
+  await Promise.all([loadPersistedBalances(), loadPersistedLatestSessions(), loadPromptSnippets()]);
+  emit();
+  checkForUpdate().catch(() => {});
+  refreshCurrentAccount().catch((error) => setToolbarStatus(error.message, true));
+  refreshStaleAccountMeta()
+    .then(() => refreshCurrentAccount())
+    .catch((error) => setToolbarStatus(error.message, true));
+  return {
+    settings: {
+      encryptionEnabled,
+      autoSwitchEnabled: values.autoSwitchEnabled === true,
+      autoSendContinuation: values.autoSendContinuation !== false,
+      targetUsageLimit: Number.isFinite(Number(values.targetUsageLimit))
+        ? Number(values.targetUsageLimit)
+        : DEFAULT_TARGET_USAGE_LIMIT,
+      switchMinBalance: Number.isFinite(Number(values.switchMinBalance))
+        ? Number(values.switchMinBalance)
+        : DEFAULT_SWITCH_MIN_BALANCE
+    },
+    template: values.continuationTemplate || DEFAULT_HANDOFF_TEMPLATE
+  };
+}
+
+async function exportHandoff() {
   if (!isSessionPage()) {
-    setToolbarStatus("请先打开 Devin 会话页面", true);
-    return;
+    throw new Error("请先打开 Devin 会话页面");
   }
-  const button = document.getElementById("devin-export-handoff");
-  setButtonLoading(button, true);
-  try {
-    setToolbarStatus("正在导出 Handoff...");
-    const { data, compact, full } = await exportHandoffForSwitch({ includeFullConversation: true });
-    const text = full || compact;
-    const link = document.createElement("a");
-    link.href = `data:text/markdown;charset=utf-8,${encodeURIComponent(text)}`;
-    link.download = `devin-handoff-${fileDateStamp()}.md`;
-    link.click();
-    setToolbarStatus(`已保存：${data.title || "Handoff"}`);
-  } catch (error) {
-    setToolbarStatus(error.message || "Handoff 导出失败", true);
-  } finally {
-    setButtonLoading(button, false);
-  }
+  setToolbarStatus("正在导出 Handoff...");
+  const result = await exportHandoffForSwitch({ includeFullConversation: true });
+  setToolbarStatus(`已保存：${result.data.title || "Handoff"}`);
+  return result;
 }
 
 const UPDATE_CHECK_KEY = "lastUpdateCheck";
@@ -2788,15 +2527,7 @@ function compareVersions(a, b) {
 }
 
 function renderUpdateNotice() {
-  const notice = document.getElementById("devin-update-notice");
-  if (!notice) return;
-  if (updateAvailableVersion) {
-    notice.hidden = false;
-    notice.textContent = `有新版 v${updateAvailableVersion}：双击 update-unpacked-windows.cmd 后重启 Chrome 即可更新。`;
-  } else {
-    notice.hidden = true;
-    notice.textContent = "";
-  }
+  emit();
 }
 
 async function checkForUpdate(force = false) {
@@ -2827,336 +2558,210 @@ async function checkForUpdate(force = false) {
   }
 }
 
-function installToolbar() {
-  if (document.getElementById("devin-exporter-toolbar")) return;
-  const style = document.createElement("style");
-  style.id = "devin-exporter-style";
-  style.textContent = `
-    #devin-exporter-toolbar,#devin-exporter-settings{position:fixed;z-index:2147483647;font:13px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#e6e9ef;color-scheme:dark}
-    @keyframes devin-spin{to{transform:rotate(360deg)}}
-    #devin-exporter-toolbar{right:16px;bottom:16px;display:flex;gap:6px;align-items:center;max-width:calc(100vw - 32px);padding:6px;border:1px solid #262b34;border-radius:12px;background:#12161dF2}
-    #devin-exporter-toolbar button,#devin-exporter-settings button{border:0;border-radius:8px;background:#222835;color:#e6e9ef;padding:7px 11px;cursor:pointer;transition:background .12s}
-    #devin-exporter-toolbar button:hover,#devin-exporter-settings button:hover{background:#2d3542}
-    #devin-exporter-toolbar #devin-export-handoff{background:#2f6bff;color:#fff;font-weight:600}
-    #devin-exporter-toolbar #devin-export-handoff:hover{background:#4179ff}
-    #devin-exporter-toolbar button:disabled{cursor:default;opacity:.55}
-    #devin-exporter-toolbar button.is-loading::after,#devin-exporter-settings button.is-loading::after{content:"";display:inline-block;width:12px;height:12px;margin-left:8px;border:2px solid #ffffff66;border-top-color:#fff;border-radius:50%;vertical-align:-2px;animation:devin-spin .7s linear infinite}
-    #devin-exporter-balance{padding:5px 9px;border-radius:8px;background:#1a1f28;color:#aab3c1;white-space:nowrap;font-variant-numeric:tabular-nums}
-    #devin-exporter-balance.balance-negative{background:#2c1c20;color:#ff9ba3}
-    #devin-exporter-balance.balance-positive{background:#16241d;color:#84dcae}
-    #devin-exporter-status{max-width:220px;overflow:hidden;color:#9aa4b2;text-overflow:ellipsis;white-space:nowrap}
-    #devin-exporter-status[data-error=true]{color:#ff9ba3}
-    #devin-exporter-phase{display:none}
-    #devin-exporter-settings{right:16px;bottom:66px;width:min(440px,calc(100vw - 32px));max-height:82vh;overflow:auto;padding:12px 14px;border:1px solid #262b34;border-radius:14px;background:#12161dFA}
-    #devin-exporter-settings h2{margin:0;font-size:15px;font-weight:600;color:#f2f4f8}
-    #devin-exporter-settings h3{margin:0 0 6px;font-size:11px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:#8a93a3}
-    #devin-exporter-settings p{margin:6px 0 10px;font-size:12px;color:#7f8896;line-height:1.5}
-    .devin-settings-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
-    .devin-close-x{padding:2px 9px!important;font-size:16px;line-height:1;background:transparent!important;color:#8a93a3}
-    .devin-close-x:hover{color:#e6e9ef}
-    .devin-icon-btn{padding:2px 8px!important;font-size:13px;background:#1e242e}
-    .devin-current{padding:10px 12px;margin-bottom:12px;border:1px solid #20262f;border-radius:10px;background:#171b23}
-    .devin-current-line{display:flex;align-items:center;justify-content:space-between;gap:8px}
-    .devin-current-email{overflow:hidden;font-size:13px;font-weight:600;color:#e6e9ef;text-overflow:ellipsis;white-space:nowrap}
-    .devin-current-meta{margin-top:2px;font-size:12px;color:#aab3c1;font-variant-numeric:tabular-nums}
-    .devin-current-meta.balance-negative{color:#ff9ba3}
-    .devin-current-meta.balance-positive{color:#84dcae}
-    .devin-current-actions{margin-top:8px}
-    .devin-current-actions button{padding:5px 11px;font-size:12px;background:#1e242e}
-    .devin-field-row{display:flex;gap:8px}
-    .devin-field{flex:1;flex-direction:column!important;align-items:stretch!important;gap:3px!important;margin:0!important;font-size:11px;color:#8a93a3}
-    .devin-field input{margin:0!important}
-    .devin-toggle-row{display:flex;flex-wrap:wrap;gap:6px 16px;margin:10px 0 2px}
-    .devin-toggle-row label{margin:0!important;font-size:12px}
-    .devin-details{margin-top:10px}
-    .devin-details summary{cursor:pointer;font-size:12px;color:#8a93a3;list-style:none}
-    .devin-details summary:hover{color:#c1c9d6}
-    .devin-details textarea{height:110px}
-    #devin-exporter-settings button.devin-primary{background:#2f6bff;color:#fff;font-weight:600}
-    #devin-exporter-settings button.devin-primary:hover{background:#4179ff}
-    #devin-exporter-settings input[type="number"],#devin-exporter-settings input[type="search"],#devin-exporter-settings input[type="text"],#devin-exporter-settings input[type="password"],#devin-exporter-settings textarea{box-sizing:border-box;width:100%;margin:4px 0;padding:8px 10px;border:1px solid #2a303b;border-radius:8px;background:#0d1117;color:#e6e9ef;outline:none}
-    #devin-exporter-settings input[type="checkbox"]{width:16px;height:16px;margin:0;flex:none;accent-color:#2f6bff}
-    #devin-exporter-settings input[type="number"]:focus,#devin-exporter-settings input[type="search"]:focus,#devin-exporter-settings textarea:focus{border-color:#2f6bff}
-    #devin-exporter-settings textarea{height:130px;resize:vertical}
-    #devin-exporter-settings label{display:flex;gap:8px;align-items:center;margin:8px 0;font-size:13px;color:#c1c9d6}
-    #devin-exporter-settings label input{width:auto;margin:0}
-    .devin-settings-section{padding:12px 0;border-top:1px solid #20262f}
-    .devin-settings-section:first-of-type{border-top:0;padding-top:0}
-    .devin-settings-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-    #devin-exporter-settings textarea#devin-batch-accounts{height:64px}
-    #devin-account-list{display:flex;flex-direction:column;border:1px solid #20262f;border-radius:10px;overflow:hidden;background:#12161d}
-    .devin-account-empty{padding:14px;font-size:12px;color:#7f8896;text-align:center}
-    .devin-account-batchbar{display:flex;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid #20262f;background:#171b23}
-    .devin-batch-selectall{display:flex;gap:6px;align-items:center;margin:0;flex:1;font-size:12px;color:#c1c9d6}
-    .devin-batch-selectall input{width:auto;margin:0}
-    .devin-account-batchbar button{padding:5px 10px;font-size:12px;background:#1e242e}
-    .devin-account-batchbar button:disabled{opacity:.45;cursor:default}
-    .devin-account-row{display:flex;flex-direction:column;gap:5px;padding:9px 10px;border-top:1px solid #191e26}
-    .devin-account-row:first-child{border-top:0}
-    .devin-account-main{display:flex;gap:9px;align-items:center}
-    .devin-account-select{width:auto;margin:0;flex:none}
-    .devin-account-identity{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
-    .devin-account-identity strong{overflow:hidden;font-size:13px;font-weight:600;color:#e6e9ef;text-overflow:ellipsis;white-space:nowrap}
-    .devin-account-identity span{overflow:hidden;font-size:11px;color:#7f8896;text-overflow:ellipsis;white-space:nowrap}
-    .devin-account-balance{flex:none;font-size:12px;color:#aab3c1;white-space:nowrap;font-variant-numeric:tabular-nums}
-    .devin-account-balance-negative,.devin-account-balance-error{color:#ff9ba3}
-    .devin-account-balance-positive{color:#84dcae}
-    .devin-account-meta{display:flex;align-items:center;gap:4px;padding-left:26px;font-size:11px;color:#7f8896;white-space:nowrap}
-    .devin-account-meta-label{flex:none}
-    .devin-account-latest-link{flex:0 1 auto;min-width:0;overflow:hidden;color:#8ab4ff;cursor:pointer;text-decoration:none;text-overflow:ellipsis;white-space:nowrap}
-    .devin-account-latest-link:hover{text-decoration:underline}
-    .devin-account-status{flex:none;color:#aab3c1}
-    .devin-account-actions{display:flex;flex-wrap:wrap;gap:5px;padding-left:26px}
-    .devin-account-actions button{padding:4px 9px;font-size:12px;background:#1e242e}
-    .devin-account-actions button.devin-account-switch{background:#264b8a;color:#dce7ff;font-weight:600}
-    .devin-account-sessions{margin-top:4px;padding:8px;border-radius:8px;background:#0d1117}
-    .devin-session-filter{margin:0 0 7px}
-    .devin-session-list{display:flex;flex-direction:column;gap:4px;max-height:230px;overflow:auto}
-    .devin-session-row{display:flex;gap:6px;align-items:center;padding:4px 2px}
-    .devin-session-title{flex:1;min-width:0;overflow:hidden;font-size:12px;color:#c1c9d6;text-overflow:ellipsis;white-space:nowrap}
-    .devin-session-row button{padding:3px 8px;font-size:11px;white-space:nowrap;background:#1e242e}
-    .devin-session-empty{padding:4px 2px;font-size:12px;color:#7f8896}
-    .devin-update-notice{margin-bottom:10px;padding:8px 10px;font-size:12px;color:#ffd479;border:1px solid #4a3d1e;border-radius:8px;background:#26200f}
-    .devin-account-archived{opacity:.6}
-    .devin-account-badge{flex:none;align-self:flex-start;padding:0 6px;font-size:10px;color:#c1c9d6;border:1px solid #333b47;border-radius:8px;background:#1e242e}
-    .devin-snippet-row{display:flex;gap:6px;align-items:center;padding:5px 0;border-top:1px solid #191e26}
-    .devin-snippet-row:first-child{border-top:0}
-    .devin-snippet-title{flex:1;min-width:0;overflow:hidden;font-size:12px;color:#c1c9d6;text-overflow:ellipsis;white-space:nowrap}
-    .devin-snippet-row button{padding:4px 9px;font-size:12px;background:#1e242e}
-    #devin-snippet-text{height:64px}
-  `;
-  document.documentElement.appendChild(style);
-  const toolbar = document.createElement("div");
-  toolbar.id = "devin-exporter-toolbar";
-  toolbar.innerHTML = `
-    <button id="devin-export-handoff" type="button">导出 Handoff</button>
-    <button id="devin-settings-button" type="button">设置</button>
-    <span id="devin-exporter-balance">余额 —</span>
-    <span id="devin-exporter-phase"></span>
-    <span id="devin-exporter-status" role="status"></span>
-  `;
-  document.body.appendChild(toolbar);
-  const panel = document.createElement("div");
-  panel.id = "devin-exporter-settings";
-  panel.hidden = true;
-  panel.innerHTML = `
-    <div class="devin-settings-header">
-      <h2>Devin Exporter</h2>
-      <button id="devin-close-settings" type="button" class="devin-close-x" title="关闭">×</button>
-    </div>
 
-    <div id="devin-update-notice" class="devin-update-notice" hidden></div>
+// ---------------------------------------------------------------------------
+// Reactive store: framework-agnostic pub/sub the React layer subscribes to.
+// UI-only state lives here so the core stays free of any DOM/React dependency.
+// ---------------------------------------------------------------------------
+let statusMessage = "";
+let statusIsError = false;
+let currentPhase = "idle";
+let currentBalanceInfo = null;
+let encryptionEnabled = false;
+let storeRevision = 0;
+const storeListeners = new Set();
 
-    <div id="devin-current-account" class="devin-current">
-      <div class="devin-current-line">
-        <span class="devin-current-email">未登录</span>
-        <button id="devin-refresh-current" type="button" class="devin-icon-btn" title="刷新">↻</button>
-      </div>
-      <div class="devin-current-meta">余额 — · 上限 —</div>
-      <div class="devin-current-actions">
-        <button id="devin-manual-switch" type="button">换到下一个号</button>
-      </div>
-    </div>
-
-    <section class="devin-settings-section">
-      <div class="devin-field-row">
-        <label class="devin-field">用量上限
-          <input id="devin-target-limit" type="number" min="0" step="0.01" placeholder="200">
-        </label>
-        <label class="devin-field">最低可切余额
-          <input id="devin-switch-min-balance" type="number" min="0" step="0.01" placeholder="65">
-        </label>
-      </div>
-      <div class="devin-toggle-row">
-        <label><input id="devin-auto-switch" type="checkbox"> 自动换号</label>
-        <label><input id="devin-auto-send" type="checkbox" checked> 自动发送续接</label>
-        <label><input id="devin-encrypt-accounts" type="checkbox"> 加密账号</label>
-      </div>
-      <div class="devin-settings-actions">
-        <button id="devin-apply-limit" type="button">应用上限</button>
-        <button id="devin-save-settings" type="button" class="devin-primary">保存设置</button>
-      </div>
-      <details class="devin-details">
-        <summary>续接模板（固定：交出上下文，接手继续）</summary>
-        <textarea id="devin-template" placeholder="续接模板"></textarea>
-        <div class="devin-settings-actions">
-          <button id="devin-reset-template" type="button">恢复默认模板</button>
-        </div>
-      </details>
-      <details class="devin-details">
-        <summary>提示词快捷剪贴板</summary>
-        <div id="devin-snippet-list"></div>
-        <input id="devin-snippet-title" type="text" placeholder="标题（如：安装 skill / 连接仓库 / 连远程）">
-        <textarea id="devin-snippet-text" placeholder="提示词内容，保存后可一键复制"></textarea>
-        <div class="devin-settings-actions">
-          <button id="devin-snippet-add" type="button">添加提示词</button>
-        </div>
-      </details>
-    </section>
-
-    <section class="devin-settings-section">
-      <h3>已保存账号</h3>
-      <div id="devin-account-list"></div>
-      <textarea id="devin-batch-accounts" placeholder="每行一个账号：邮箱---密码（第三段及以后忽略）"></textarea>
-      <div class="devin-settings-actions"><button id="devin-batch-add" type="button">添加账号</button></div>
-    </section>
-  `;
-  document.body.appendChild(panel);
-  toolbar.querySelector("#devin-export-handoff").addEventListener("click", exportHandoffInPage);
-  toolbar.querySelector("#devin-settings-button").addEventListener("click", () => {
-    if (!panel.hidden) {
-      panel.hidden = true;
-      return;
+function emit() {
+  storeRevision += 1;
+  for (const listener of storeListeners) {
+    try {
+      listener();
+    } catch {
+      // A misbehaving subscriber must not break the others.
     }
-    openSettingsPanel().then(async () => {
-      const stored = await storageGet(["continuationTemplate"]);
-      panel.querySelector("#devin-template").value = stored.continuationTemplate || DEFAULT_HANDOFF_TEMPLATE;
-    }).catch((error) => setToolbarStatus(error.message, true));
-  });
-  panel.querySelector("#devin-batch-add").addEventListener("click", () => {
-    addBatchAccountsFromPanel().catch((error) => setToolbarStatus(error.message, true));
-  });
-  panel.querySelector("#devin-snippet-add").addEventListener("click", addPromptSnippetFromPanel);
-  panel.querySelector("#devin-apply-limit").addEventListener("click", applyTargetUsageLimit);
-  panel.querySelector("#devin-refresh-current").addEventListener("click", () => {
-    refreshCurrentAccount().catch((error) => setToolbarStatus(error.message, true));
-    refreshBalanceDisplay();
-  });
-  panel.querySelector("#devin-manual-switch").addEventListener("click", () => {
-    beginAutoSwitch(true).catch((error) => setToolbarStatus(error.message, true));
-  });
-  panel.querySelector("#devin-save-settings").addEventListener("click", saveSettingsPanel);
-  panel.querySelector("#devin-reset-template").addEventListener("click", () => {
-    panel.querySelector("#devin-template").value = DEFAULT_HANDOFF_TEMPLATE;
-  });
-  panel.querySelector("#devin-close-settings").addEventListener("click", () => {
-    panel.hidden = true;
-  });
-  const templateSave = panel.querySelector("#devin-save-settings");
-  templateSave.addEventListener("click", async () => {
-    await storageSet({ continuationTemplate: panel.querySelector("#devin-template").value });
-  });
-  refreshBalanceDisplay();
-}
-
-function updateToolbar() {
-  const exportButton = document.getElementById("devin-export-handoff");
-  if (exportButton) exportButton.disabled = !isSessionPage();
-  storageGet(["autoSwitchState"]).then((stored) => toolbarPhase(stored.autoSwitchState)).catch(() => {});
-}
-
-async function refreshBalanceDisplay() {
-  const element = document.getElementById("devin-exporter-balance");
-  if (!element) return;
-  try {
-    const info = await fetchBillingInfo();
-    element.textContent = formatBalanceOnly(info);
-    element.className = balanceToneClass(info);
-    const current = document.getElementById("devin-current-account");
-    if (current && !document.getElementById("devin-exporter-settings")?.hidden) {
-      renderCurrentAccount(current, info);
-    }
-  } catch {
-    element.textContent = "余额 —";
-    element.className = "";
   }
 }
 
-function renderCurrentAccount(element, info) {
-  element.querySelector(".devin-current-email").textContent = currentEmailCache || "未登录";
-  const meta = element.querySelector(".devin-current-meta");
-  if (info) {
-    meta.textContent = formatBalanceDisplay(info);
-    meta.className = `devin-current-meta ${balanceToneClass(info)}`;
-  } else {
-    meta.textContent = "余额 — · 上限 —";
-    meta.className = "devin-current-meta";
+function subscribe(listener) {
+  storeListeners.add(listener);
+  return () => storeListeners.delete(listener);
+}
+
+function getRevision() {
+  return storeRevision;
+}
+
+function getStatus() {
+  return { message: statusMessage, isError: statusIsError };
+}
+
+function getPhase() {
+  return currentPhase;
+}
+
+function getUpdateVersion() {
+  return updateAvailableVersion;
+}
+
+function getCurrentEmail() {
+  return currentEmailCache;
+}
+
+function getCurrentBalanceInfo() {
+  return currentBalanceInfo;
+}
+
+function getAccounts() {
+  return accountDraft;
+}
+
+function getSnippets() {
+  return promptSnippets;
+}
+
+function getEncryptionEnabled() {
+  return encryptionEnabled;
+}
+
+function isAccountSelected(key) {
+  return selectedAccountKeys.has(key);
+}
+
+function getSelectedCount() {
+  return accountDraft.filter((account) => selectedAccountKeys.has(accountKey(account))).length;
+}
+
+function getBalanceInfo(key) {
+  return accountBalanceCache.get(key) || null;
+}
+
+function getLatestInfo(key) {
+  return accountLatestCache.get(key) || null;
+}
+
+function getSessionsState(key) {
+  return accountSessionsCache.get(key) || null;
+}
+
+function setSessionFilter(key, value) {
+  const state = accountSessionsCache.get(key);
+  if (!state) return;
+  state.filter = value;
+  accountSessionsCache.set(key, state);
+  emit();
+}
+
+async function refreshBalanceDisplay() {
+  try {
+    const info = await fetchBillingInfo();
+    currentBalanceInfo = info;
+    emit();
+    return info;
+  } catch {
+    currentBalanceInfo = null;
+    emit();
+    return null;
   }
 }
 
 async function refreshCurrentAccount() {
-  const element = document.getElementById("devin-current-account");
-  if (!element) return;
-  renderCurrentAccount(element, null);
   const [email, info] = await Promise.all([
     resolveCurrentAccountEmail().catch(() => currentEmailCache),
     fetchBillingInfo().catch(() => null)
   ]);
   currentEmailCache = email || currentEmailCache;
-  renderCurrentAccount(element, info);
+  if (info) currentBalanceInfo = info;
+  emit();
 }
 
-const isAppHost = typeof location !== "undefined" && location.hostname === "app.devin.ai";
-const isAutoSwitchHost = isAppHost
-  || (typeof location !== "undefined" && location.hostname === "devin.ai");
-
-if (typeof document !== "undefined" && isAutoSwitchHost) {
-  if (isAppHost) {
-    installToolbar();
-    updateToolbar();
-    checkForUpdate().catch(() => {});
-    setInterval(() => checkForUpdate().catch(() => {}), UPDATE_CHECK_INTERVAL_MS);
-    setInterval(() => refreshBalanceDisplay(), 30000);
-    new MutationObserver(() => {
-      installToolbar();
-      updateToolbar();
-    }).observe(document.documentElement, { childList: true, subtree: true });
-  }
-  runAutoSwitch().catch((error) => setToolbarStatus(error.message, true));
-  setInterval(() => {
-    if (isAppHost) {
-      installToolbar();
-      updateToolbar();
-    }
-    runAutoSwitch().catch((error) => setToolbarStatus(error.message, true));
-  }, 1500);
-}
-
-if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message?.type !== "extractConversation") {
-      return false;
-    }
-
-    extractConversation(message.options)
-      .then((data) => sendResponse({ ok: true, data }))
-      .catch((error) => sendResponse({
-        ok: false,
-        error: error.message || "Conversation extraction failed"
-      }));
-    return true;
-  });
-}
-
-if (typeof module !== "undefined") {
-  module.exports = {
-    buildMessages,
-    buildWorklog,
-    buildHandoff,
-    collapseNoise,
-    summarizeAttachmentMarkers,
-    inlineAttachmentsInText,
-    summarizeTodos,
-    fileDateStamp,
-    buildContinuationText,
-    applyHandoff,
-    buildUsageLimitBody,
-    formatBalanceDisplay,
-    formatBalanceOnly,
-    accountAvailableBalance,
-    balanceToneClass,
-    parseBatchAccounts,
-    parseAccountLine,
-    normalizeAccountObject,
-    mergeBatchAccounts,
-    normalizeSessionRecord,
-    pickLatestSession,
-    formatSessionStatus,
-    sessionStatusIcon,
-    compareVersions,
-    buildVauthPayload,
-    buildIsolatedSessionUrl,
-    selectNextAccount,
-    routeAutoSwitch
-  };
-}
+export {
+  // Pure helpers (also used by tests and the popup formatter path).
+  buildMessages,
+  buildWorklog,
+  buildHandoff,
+  collapseNoise,
+  summarizeAttachmentMarkers,
+  inlineAttachmentsInText,
+  summarizeTodos,
+  fileDateStamp,
+  buildContinuationText,
+  applyHandoff,
+  buildUsageLimitBody,
+  formatBalanceDisplay,
+  formatBalanceOnly,
+  accountAvailableBalance,
+  balanceToneClass,
+  parseBatchAccounts,
+  parseAccountLine,
+  normalizeAccountObject,
+  mergeBatchAccounts,
+  normalizeSessionRecord,
+  pickLatestSession,
+  formatSessionStatus,
+  sessionStatusIcon,
+  compareVersions,
+  buildVauthPayload,
+  buildIsolatedSessionUrl,
+  selectNextAccount,
+  routeAutoSwitch,
+  // Constants.
+  DEFAULT_HANDOFF_TEMPLATE,
+  DEFAULT_TARGET_USAGE_LIMIT,
+  DEFAULT_SWITCH_MIN_BALANCE,
+  UPDATE_CHECK_INTERVAL_MS,
+  // Store.
+  subscribe,
+  getRevision,
+  getStatus,
+  getPhase,
+  getUpdateVersion,
+  getCurrentEmail,
+  getCurrentBalanceInfo,
+  getAccounts,
+  getSnippets,
+  getEncryptionEnabled,
+  isAccountSelected,
+  getSelectedCount,
+  getBalanceInfo,
+  getLatestInfo,
+  getSessionsState,
+  setSessionFilter,
+  accountKey,
+  accountBalanceClass,
+  formatAccountBalance,
+  formatLatestSession,
+  isSessionPage,
+  setToolbarStatus,
+  // Data / lifecycle actions.
+  extractConversation,
+  exportHandoff,
+  exportSessionHandoff,
+  refreshBalanceDisplay,
+  refreshCurrentAccount,
+  refreshAccountMeta,
+  refreshStaleAccountMeta,
+  loadSettingsState,
+  saveSettings,
+  setEncryptionEnabled,
+  applyTargetUsageLimit,
+  addBatchAccounts,
+  deleteAccount,
+  deleteSelectedAccounts,
+  refreshAccountsBalances,
+  toggleAccountSelect,
+  setAllAccountsSelected,
+  moveAccount,
+  toggleAccountArchive,
+  accountEditText,
+  toggleAccountSessions,
+  openLatestSession,
+  openIsolatedSession,
+  resolveAccountAuth,
+  beginAutoSwitch,
+  beginSwitchToAccount,
+  copySnippetToClipboard,
+  addPromptSnippet,
+  removePromptSnippet,
+  runAutoSwitch,
+  checkForUpdate
+};

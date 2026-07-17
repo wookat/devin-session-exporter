@@ -1,0 +1,6 @@
+node_modules/
+dist/
+*.crx
+key.pem
+updates.xml
+devin-session-exporter.zip
