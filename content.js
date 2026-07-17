@@ -1221,8 +1221,8 @@ async function resolveCurrentAccountEmail() {
   const headers = { Authorization: `Bearer ${authSession.token}`, accept: "application/json" };
   if (orgId) headers["x-cog-org-id"] = orgId;
   const endpoints = [];
-  if (userId) endpoints.push(`/api/users/${userId}`);
-  endpoints.push("/api/users/me", "/api/user");
+  if (userId) endpoints.push(`/api/users/${userId}/profile`);
+  endpoints.push("/api/users/current-membership");
   for (const url of endpoints) {
     try {
       const response = await fetch(url, { headers });
