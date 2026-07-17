@@ -367,7 +367,9 @@ async function fetchBalanceForAuth(auth) {
     availableCredits: status?.available_credits ?? null,
     maxAcuLimit: limits?.max_acu_limit ?? null,
     billingError: status?.billing_error ?? null,
-    orgName: auth.orgName
+    orgName: auth.orgName,
+    orgId: auth.orgId || null,
+    userId: auth.userId || null
   };
 }
 
@@ -1113,6 +1115,32 @@ function jwtEmail(token) {
   }
 }
 
+function pickEmail(data) {
+  if (!data || typeof data !== "object") return "";
+  return data.email || data.user_email || data.emailAddress
+    || data.user?.email || data.user?.user_email
+    || data.account?.email || data.profile?.email || "";
+}
+
+function currentUserId(authSession) {
+  return authSession?.userId || authSession?.uid || authSession?.user_id
+    || authSession?.user?.uid || authSession?.user?.id || "";
+}
+
+// Match the currently logged-in org/user against saved accounts whose org/user
+// we cached during a balance refresh. This works even when the account was
+// switched outside our tool, as long as it is in the saved list.
+function matchSavedAccountEmail(orgId, userId) {
+  for (const account of accountDraft) {
+    const info = accountBalanceCache.get(accountKey(account));
+    if (!info) continue;
+    if ((orgId && info.orgId === orgId) || (userId && info.userId === userId)) {
+      if (account.email) return account.email;
+    }
+  }
+  return "";
+}
+
 let currentEmailCache = "";
 async function resolveCurrentAccountEmail() {
   const local = currentAccountEmail();
@@ -1120,32 +1148,64 @@ async function resolveCurrentAccountEmail() {
     currentEmailCache = local;
     return local;
   }
-  const authSession = readAuthSession();
-  const tokenEmail = jwtEmail(authSession?.token);
+  let authSession = null;
+  try {
+    authSession = readAuthSession();
+  } catch {
+    return currentEmailCache;
+  }
+  const tokenEmail = jwtEmail(authSession.token);
   if (tokenEmail) {
     currentEmailCache = tokenEmail;
     return tokenEmail;
   }
+  let orgId = "";
   try {
-    if (!authSession?.token) return currentEmailCache;
+    ({ orgId } = await resolveBillingOrg());
+  } catch {
+    orgId = "";
+  }
+  const userId = currentUserId(authSession);
+  const headers = { Authorization: `Bearer ${authSession.token}`, accept: "application/json" };
+  if (orgId) headers["x-cog-org-id"] = orgId;
+  const endpoints = [];
+  if (userId) endpoints.push(`/api/users/${userId}`);
+  endpoints.push("/api/users/me", "/api/user");
+  for (const url of endpoints) {
+    try {
+      const response = await fetch(url, { headers });
+      if (!response.ok) continue;
+      const email = pickEmail(await response.json());
+      if (email) {
+        currentEmailCache = email;
+        return email;
+      }
+    } catch {
+      // Try the next endpoint.
+    }
+  }
+  try {
     const response = await fetch("/api/users/post-auth", {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${authSession.token}`,
-        "content-type": "application/json",
-        accept: "application/json"
-      },
+      headers: { ...headers, "content-type": "application/json" },
       body: "{}"
     });
-    if (!response.ok) return currentEmailCache;
-    const data = await response.json();
-    const email = data?.email || data?.user_email || data?.user?.email
-      || data?.user?.user_email || data?.account?.email || "";
-    if (email) currentEmailCache = email;
-    return currentEmailCache;
+    if (response.ok) {
+      const email = pickEmail(await response.json());
+      if (email) {
+        currentEmailCache = email;
+        return email;
+      }
+    }
   } catch {
-    return currentEmailCache;
+    // Fall through to saved-account matching.
   }
+  const matched = matchSavedAccountEmail(orgId, userId);
+  if (matched) {
+    currentEmailCache = matched;
+    return matched;
+  }
+  return currentEmailCache;
 }
 
 function isQuotaExceeded() {
@@ -2456,7 +2516,9 @@ async function openSettingsPanel() {
     renderUpdateNotice();
     checkForUpdate().catch(() => {});
     refreshCurrentAccount().catch((error) => setToolbarStatus(error.message, true));
-    refreshStaleAccountMeta().catch((error) => setToolbarStatus(error.message, true));
+    refreshStaleAccountMeta()
+      .then(() => refreshCurrentAccount())
+      .catch((error) => setToolbarStatus(error.message, true));
   } catch (error) {
     setToolbarStatus(error.message, true);
   }
