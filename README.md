@@ -31,18 +31,16 @@ installs the extension for **all Chrome profiles on the machine** via Chrome's
 enterprise policy (self-hosted, force-installed) and Chrome then **auto-updates**
 it from the GitHub release — no manual reinstall on new versions.
 
-1. Download `install/install-windows.ps1` from this repo.
-2. Right-click it → **Run with PowerShell** (it self-elevates to administrator),
-   or run `powershell -ExecutionPolicy Bypass -File .\install-windows.ps1`.
+1. Download `install/install-windows.cmd` from this repo.
+2. **Double-click it** (it self-elevates and prompts for administrator).
 3. Fully restart Chrome (close all windows). The extension appears in every
    profile, fixed extension ID `mdahidnfandbmeaoegfkiajhjaoehldl`.
 
-To remove it, run `install/uninstall-windows.ps1` and restart Chrome.
+To remove it, double-click `install/uninstall-windows.cmd` and restart Chrome.
 
-If you don't have administrator rights, use `install/install-windows-user.ps1`
-instead: it writes the same policy under `HKCU` (current Windows user only, no
-UAC prompt) and works the same way, including auto-update. Remove it with
-`install/uninstall-windows-user.ps1`.
+(PowerShell equivalents `install/install-windows.ps1` /
+`install-windows-user.ps1` — the latter is a no-admin `HKCU` variant — are also
+available.)
 
 **How updates work.** Pushing a commit to `main` with a bumped `version` in
 `manifest.json` triggers `.github/workflows/release-extension.yml`, which packs a
@@ -182,17 +180,15 @@ Firefox 可以通过 `about:debugging` → **此 Firefox** → **临时载入附
 Chrome 企业策略（自托管、强制安装）把插件装到**本机所有 Chrome 配置文件**，
 之后 Chrome 会从 GitHub Release **自动更新**，发新版无需手动重装。
 
-1. 从仓库下载 `install/install-windows.ps1`。
-2. 右键 → **使用 PowerShell 运行**（脚本会自动请求管理员权限），或执行
-   `powershell -ExecutionPolicy Bypass -File .\install-windows.ps1`。
+1. 从仓库下载 `install/install-windows.cmd`。
+2. **双击运行**（会自动请求管理员授权）。
 3. 完全重启 Chrome（关闭所有窗口）。插件会出现在每个 profile 里，固定扩展 ID
    `mdahidnfandbmeaoegfkiajhjaoehldl`。
 
-卸载：运行 `install/uninstall-windows.ps1` 后重启 Chrome。
+卸载：双击 `install/uninstall-windows.cmd` 后重启 Chrome。
 
-没有管理员权限时，改用 `install/install-windows-user.ps1`：它把同样的策略写入
-`HKCU`（仅当前 Windows 用户，无需 UAC），效果一致、同样自动更新。卸载用
-`install/uninstall-windows-user.ps1`。
+（也提供 PowerShell 版 `install/install-windows.ps1`，以及免管理员的 `HKCU` 版
+`install-windows-user.ps1`。）
 
 **更新机制**：向 `main` 推送并把 `manifest.json` 里的 `version` 提升，会触发
 `.github/workflows/release-extension.yml`，用仓库密钥 `EXTENSION_CRX_KEY` 打包
