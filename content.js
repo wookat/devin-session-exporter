@@ -90,7 +90,8 @@ function buildWorklog(events) {
       startingDir: event.starting_dir ?? null,
       background,
       exitCode: null,
-      output: null
+      output: null,
+      isMajorAction: event.is_major_action === true
     };
     worklog.push(command);
     if (event.process_id != null) {
@@ -154,7 +155,8 @@ function buildWorklog(events) {
             startLine: update.start_line ?? null,
             endLine: update.end_line ?? null,
             totalLines: update.total_lines ?? null,
-            contentsKey: update.contents_key ?? null
+            contentsKey: update.contents_key ?? null,
+            isMajorAction: event.is_major_action === true
           });
         }
         break;
@@ -168,7 +170,8 @@ function buildWorklog(events) {
             commandName: search.command_name ?? null,
             resultFilenames: Array.isArray(event.search_result_filenames)
               ? event.search_result_filenames
-              : []
+              : [],
+            isMajorAction: event.is_major_action === true
           });
         }
         break;
@@ -354,6 +357,923 @@ async function extractConversation(options = {}) {
   };
 }
 
+const DEFAULT_HANDOFF_TEMPLATE = `请先接入并检查我的远程 GPU 集群，不要自行选择项目或开始训练。
+
+连接主服务器：
+ssh dell@xu-1
+
+项目和证据保存在 ~/wookat；请把重要材料保存在 xu-1。先进行只读检查，等待我提供具体任务。
+
+【上一会话的上下文（用于续接）】
+{{HANDOFF}}
+`;
+
+const HANDOFF_COLLAPSE_PLACEHOLDER = "[续接自前序会话；完整历史见 xu-1 上的 ~/wookat 与 CONTINUATION.md]";
+
+function handoffSafeText(value) {
+  return String(value || "")
+    .replace(/((?:api[_ -]?key|auth(?:entication)? key|token|password|secret)\s*[:=]\s*)\S+/gi, "$1[redacted]")
+    .replace(/-----BEGIN [^-]+ PRIVATE KEY-----[\s\S]*?-----END [^-]+ PRIVATE KEY-----/g, "[private key redacted]");
+}
+
+function collapsePriorHandoff(value) {
+  const text = String(value || "");
+  const positions = [
+    text.indexOf("【上一会话的上下文（用于续接）】"),
+    text.indexOf("# Devin Context Handoff")
+  ].filter((position) => position >= 0);
+  if (!positions.length) return text;
+  const prefix = text.slice(0, Math.min(...positions)).trimEnd();
+  return prefix ? `${prefix}\n${HANDOFF_COLLAPSE_PLACEHOLDER}` : HANDOFF_COLLAPSE_PLACEHOLDER;
+}
+
+function buildHandoff(data, options = {}) {
+  const messages = Array.isArray(data.messages) ? data.messages : [];
+  const worklog = Array.isArray(data.worklog) ? data.worklog : [];
+  const collapsedMessages = messages.map((message) => (
+    message.role === "user"
+      ? { ...message, text: collapsePriorHandoff(message.text) }
+      : message
+  ));
+  const users = collapsedMessages.filter((message) => message.role === "user");
+  const decisions = messages.filter((message) => (
+    message.role === "devin" && message.type === "devin_message"
+  ));
+  const latestTodos = [...worklog].reverse().find((entry) => entry.kind === "todos");
+  const files = [...new Set(worklog
+    .filter((entry) => entry.kind === "file" && entry.action !== "read" && entry.path)
+    .map((entry) => entry.path)
+    .filter((path) => !/(^|\/)(?:\.env|.*\.(?:pem|key))$|id_rsa/i.test(path)))];
+  const environment = [];
+  const majorActions = worklog.filter((entry) => entry.isMajorAction === true).slice(-12);
+
+  for (const entry of worklog) {
+    if (entry.kind !== "command") continue;
+    const command = handoffSafeText(entry.command);
+    const ssh = command.match(/\b(?:ssh|scp)\s+(?:-[^\s]+\s+)*(?:[\w.-]+@)?[\w.-]+/g) || [];
+    const clones = command.match(/\bgit\s+clone\s+\S+/g) || [];
+    const conda = command.match(/\bconda\s+(?:activate|create)\s+[^\s]+/g) || [];
+    environment.push(...ssh.map((value) => `Remote target: ${value}`));
+    environment.push(...clones.map((value) => `Repository: ${value}`));
+    environment.push(...conda.map((value) => `Environment: ${value}`));
+    if (entry.startingDir) environment.push(`Working directory: ${handoffSafeText(entry.startingDir)}`);
+  }
+
+  const majorText = majorActions.map((entry) => {
+    if (entry.kind === "command") return `$ ${handoffSafeText(entry.command)}`;
+    if (entry.kind === "file") return `${entry.action === "read" ? "Read" : "Edit"} ${entry.path || "unknown file"}`;
+    if (entry.kind === "search") return `Search ${entry.regex || ""} in ${entry.path || "unknown path"}`;
+    return handoffSafeText(entry.text || entry.kind);
+  });
+  const lines = [
+    "# Devin Context Handoff",
+    "",
+    `Source session: ${data.title || "Devin session"}`,
+    `Source URL: ${data.url || ""}`,
+    `Exported at: ${data.exportedAt || ""}`,
+    "",
+    "## Continuity",
+    "Full cross-session history lives on xu-1 at ~/wookat and CONTINUATION.md.",
+    "This handoff carries the latest session's decisions and progress as a recent delta.",
+    "A new session should read xu-1 first, then use this handoff for current context.",
+    "",
+    "## Objective and evolution",
+    ...(users.length ? users.map((message, index) => `${index + 1}. ${handoffSafeText(message.text)}`) : ["No user messages captured."]),
+    "",
+    "## Key decisions, conclusions, and current direction",
+    ...(decisions.length ? decisions.map((message) => `- ${handoffSafeText(message.text)}`) : ["No Devin conclusions captured."]),
+    "",
+    "## Current status",
+    ...(latestTodos && Array.isArray(latestTodos.todos)
+      ? latestTodos.todos.map((todo) => `- ${todo.status === "completed" ? "[x]" : "[ ]"} ${handoffSafeText(todo.content)}`)
+      : ["No todo state captured."]),
+    "",
+    "## Environment and how to resume",
+    ...([...new Set(environment)].length ? [...new Set(environment)].map((item) => `- ${item}`) : ["Use the continuation template's cluster instructions."]),
+    "",
+    "## Files created or modified",
+    ...(files.length ? files.map((file) => `- ${file}`) : ["No file edits captured."]),
+    "",
+    "## Recent major actions",
+    ...(majorText.length ? majorText.map((item) => `- ${item}`) : ["No major actions captured."])
+  ];
+  if (options.includeFullConversation !== false) {
+    lines.push("", "## Full conversation", "The following messages are the complete captured conversation:", "");
+    for (const message of collapsedMessages) {
+      lines.push(`### ${message.role === "user" ? "User" : "Devin"}`, handoffSafeText(message.text), "");
+    }
+  }
+  return `${lines.join("\n").trimEnd()}\n`;
+}
+
+function buildContinuationText(template, handoff) {
+  const safeTemplate = typeof template === "string" ? template : DEFAULT_HANDOFF_TEMPLATE;
+  if (!handoff) return safeTemplate;
+  return safeTemplate.includes("{{HANDOFF}}")
+    ? safeTemplate.replace(/\{\{HANDOFF\}\}/g, handoff)
+    : `${safeTemplate.trimEnd()}\n\n---\n\n${handoff}`;
+}
+
+const applyHandoff = buildContinuationText;
+
+function selectNextAccount(accounts, currentEmail, lastUsedEmail = "") {
+  const ordered = Array.isArray(accounts) ? accounts.filter((account) => (
+    account && typeof account.email === "string" && account.email.trim()
+  )) : [];
+  if (!ordered.length) return null;
+  const normalizedCurrent = String(currentEmail || "").trim().toLowerCase();
+  const normalizedLast = String(lastUsedEmail || "").trim().toLowerCase();
+  const index = ordered.findIndex((account) => account.email.trim().toLowerCase() === normalizedCurrent);
+  const start = index >= 0
+    ? index
+    : ordered.findIndex((account) => account.email.trim().toLowerCase() === normalizedLast);
+  const offset = start >= 0 ? 1 : 0;
+  return ordered[(Math.max(start, 0) + offset) % ordered.length];
+}
+
+function routeAutoSwitch(currentUrl, state = {}, signals = {}) {
+  const url = new URL(currentUrl, "https://app.devin.ai");
+  const path = url.pathname;
+  if (state.phase === "loggingOut") {
+    return path === "/auth/login" ? "driveLogin" : (signals.loggedOut ? "navigateLogin" : "driveLogout");
+  }
+  if (state.phase === "loggingIn") {
+    if (url.hostname === "devin.ai") return "navigateLogin";
+    return path === "/auth/login" ? "driveLogin" : (path.startsWith("/org/") ? "createSession" : "wait");
+  }
+  if (state.phase === "creatingSession") {
+    return path.startsWith("/org/") ? "createSession" : (path.startsWith("/sessions/") ? "done" : "wait");
+  }
+  if (state.phase === "idle" && signals.enabled && path.startsWith("/sessions/") && signals.quotaExceeded) {
+    return "beginSwitch";
+  }
+  return "wait";
+}
+
+const extensionApi = globalThis.browser ?? globalThis.chrome;
+const AUTO_SWITCH_KEYS = [
+  "managedAccounts",
+  "accountVault",
+  "accountEncryptionEnabled",
+  "autoSwitchEnabled",
+  "autoSendContinuation",
+  "autoSwitchState",
+  "lastHandoff",
+  "lastUsedAccountEmail",
+  "continuationTemplate"
+];
+
+function storageGet(keys = AUTO_SWITCH_KEYS) {
+  if (!extensionApi?.storage?.local) return Promise.resolve({});
+  if (globalThis.browser) return extensionApi.storage.local.get(keys);
+  return new Promise((resolve, reject) => {
+    extensionApi.storage.local.get(keys, (result) => {
+      const error = extensionApi.runtime?.lastError;
+      if (error) reject(new Error(error.message));
+      else resolve(result || {});
+    });
+  });
+}
+
+function storageSet(values) {
+  if (!extensionApi?.storage?.local) return Promise.resolve();
+  if (globalThis.browser) return extensionApi.storage.local.set(values);
+  return new Promise((resolve, reject) => {
+    extensionApi.storage.local.set(values, () => {
+      const error = extensionApi.runtime?.lastError;
+      if (error) reject(new Error(error.message));
+      else resolve();
+    });
+  });
+}
+
+function storageRemove(keys) {
+  if (!extensionApi?.storage?.local) return Promise.resolve();
+  if (globalThis.browser) return extensionApi.storage.local.remove(keys);
+  return new Promise((resolve, reject) => {
+    extensionApi.storage.local.remove(keys, () => {
+      const error = extensionApi.runtime?.lastError;
+      if (error) reject(new Error(error.message));
+      else resolve();
+    });
+  });
+}
+
+function bytesToBase64(bytes) {
+  let value = "";
+  for (const byte of bytes) value += String.fromCharCode(byte);
+  return btoa(value);
+}
+
+function base64ToBytes(value) {
+  return Uint8Array.from(atob(value), (character) => character.charCodeAt(0));
+}
+
+async function deriveAccountKey(passphrase, salt) {
+  const material = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(passphrase),
+    "PBKDF2",
+    false,
+    ["deriveKey"]
+  );
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt, iterations: 150000, hash: "SHA-256" },
+    material,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+function cachedPassphrase() {
+  try {
+    return sessionStorage.getItem("devinExporterMasterPassphrase") || "";
+  } catch {
+    return "";
+  }
+}
+
+function cachePassphrase(value) {
+  try {
+    if (value) sessionStorage.setItem("devinExporterMasterPassphrase", value);
+    else sessionStorage.removeItem("devinExporterMasterPassphrase");
+  } catch {
+    // Session storage may be unavailable in a restricted page.
+  }
+}
+
+async function encryptAccounts(accounts, passphrase) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await deriveAccountKey(passphrase, salt);
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    key,
+    new TextEncoder().encode(JSON.stringify(accounts))
+  );
+  return {
+    salt: bytesToBase64(salt),
+    iv: bytesToBase64(iv),
+    ciphertext: bytesToBase64(new Uint8Array(ciphertext))
+  };
+}
+
+async function decryptAccounts(vault, passphrase) {
+  const salt = base64ToBytes(vault.salt);
+  const iv = base64ToBytes(vault.iv);
+  const key = await deriveAccountKey(passphrase, salt);
+  const plaintext = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv },
+    key,
+    base64ToBytes(vault.ciphertext)
+  );
+  const accounts = JSON.parse(new TextDecoder().decode(plaintext));
+  return Array.isArray(accounts) ? accounts : [];
+}
+
+async function loadManagedAccounts() {
+  const stored = await storageGet(["managedAccounts", "accountVault", "accountEncryptionEnabled"]);
+  if (!stored.accountEncryptionEnabled) {
+    return Array.isArray(stored.managedAccounts) ? stored.managedAccounts : [];
+  }
+  if (!stored.accountVault) return [];
+  let passphrase = cachedPassphrase();
+  if (!passphrase) {
+    passphrase = window.prompt("请输入账号列表主密码（仅本次浏览器会话缓存）") || "";
+    if (!passphrase) throw new Error("需要主密码才能读取账号列表");
+    cachePassphrase(passphrase);
+  }
+  try {
+    return await decryptAccounts(stored.accountVault, passphrase);
+  } catch {
+    cachePassphrase("");
+    throw new Error("账号列表解密失败，请检查主密码");
+  }
+}
+
+async function saveManagedAccounts(accounts, encrypted, passphrase = "") {
+  if (encrypted) {
+    const effectivePassphrase = passphrase || cachedPassphrase()
+      || window.prompt("设置账号列表主密码（仅本次浏览器会话缓存）")
+      || "";
+    if (!effectivePassphrase) throw new Error("未设置主密码，无法启用加密");
+    cachePassphrase(effectivePassphrase);
+    const accountVault = await encryptAccounts(accounts, effectivePassphrase);
+    await storageSet({ accountVault, accountEncryptionEnabled: true });
+    await storageRemove("managedAccounts");
+    return;
+  }
+  cachePassphrase("");
+  await storageSet({ managedAccounts: accounts, accountEncryptionEnabled: false });
+  await storageRemove("accountVault");
+}
+
+function currentAccountEmail() {
+  try {
+    const session = JSON.parse(localStorage.getItem("auth1_session") || "null");
+    return session?.email || session?.user?.email || session?.user_email || "";
+  } catch {
+    return "";
+  }
+}
+
+function isQuotaExceeded() {
+  const text = document.body?.innerText || "";
+  return /usage quota exceeded|usage quota has been exceeded|out of on-demand usage|ran out of free credits/i.test(text);
+}
+
+function visibleButtons() {
+  return [...document.querySelectorAll("button")].filter((button) => {
+    const style = getComputedStyle(button);
+    return style.display !== "none" && style.visibility !== "hidden";
+  });
+}
+
+function clickButtonContaining(text) {
+  const target = visibleButtons().find((button) => (
+    (button.innerText || button.textContent || "").trim().toLowerCase().includes(text.toLowerCase())
+  ));
+  if (!target) return false;
+  target.click();
+  return true;
+}
+
+function setNativeValue(element, value) {
+  const prototype = element instanceof HTMLInputElement
+    ? HTMLInputElement.prototype
+    : HTMLTextAreaElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
+  setter?.call(element, value);
+  element.dispatchEvent(new Event("input", { bubbles: true }));
+  element.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function findComposer() {
+  const elements = [...document.querySelectorAll("textarea, div[contenteditable='true']")];
+  return elements.find((element) => {
+    const placeholder = element.getAttribute("placeholder")
+      || element.querySelector("[contenteditable='false']")?.textContent
+      || "";
+    return /ask devin|build features|fix bugs|work on your code/i.test(placeholder);
+  }) || elements.find((element) => {
+    const style = getComputedStyle(element);
+    return style.display !== "none" && style.visibility !== "hidden";
+  });
+}
+
+function injectComposerText(text) {
+  const composer = findComposer();
+  if (!composer) throw new Error("Could not find the Devin message composer");
+  composer.focus();
+  if (composer instanceof HTMLTextAreaElement) {
+    setNativeValue(composer, text);
+    return composer;
+  }
+
+  let inserted = false;
+  try {
+    document.execCommand("selectAll", false);
+    inserted = document.execCommand("insertText", false, text);
+  } catch {
+    inserted = false;
+  }
+  if (!inserted) {
+    try {
+      composer.dispatchEvent(new InputEvent("beforeinput", {
+        bubbles: true,
+        inputType: "insertText",
+        data: text
+      }));
+      composer.dispatchEvent(new ClipboardEvent("paste", {
+        bubbles: true,
+        clipboardData: new DataTransfer()
+      }));
+    } catch {
+      // Fall through to the last-resort DOM update.
+    }
+  }
+  if (!inserted) {
+    composer.textContent = text;
+    composer.dispatchEvent(new InputEvent("input", {
+      bubbles: true,
+      inputType: "insertText",
+      data: text
+    }));
+  }
+  return composer;
+}
+
+function clickSendButton() {
+  const button = document.querySelector("button[aria-label='Send']");
+  if (!button || button.disabled) return false;
+  button.click();
+  return true;
+}
+
+function setToolbarStatus(message, isError = false) {
+  const element = document.getElementById("devin-exporter-status");
+  if (element) {
+    element.textContent = message;
+    element.dataset.error = isError ? "true" : "false";
+  }
+}
+
+async function saveAutoSwitchState(state) {
+  await storageSet({ autoSwitchState: state });
+  const phase = document.getElementById("devin-exporter-phase");
+  if (phase) phase.textContent = `状态：${state.phase || "idle"}`;
+}
+
+function loginErrorVisible() {
+  return /invalid password|incorrect password|unable to log in|login failed|wrong password/i
+    .test(document.body?.innerText || "");
+}
+
+async function abortAutoSwitch(message) {
+  await saveAutoSwitchState({
+    phase: "failed",
+    failedAt: new Date().toISOString(),
+    message
+  });
+  setToolbarStatus(message, true);
+}
+
+async function waitForElement(getElement, timeout = 12000, interval = 300) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const element = getElement();
+    if (element) return element;
+    await new Promise((resolve) => setTimeout(resolve, interval));
+  }
+  return null;
+}
+
+async function driveLogout(state) {
+  if (state.lastActionAt && Date.now() - state.lastActionAt < 1500) return;
+  const currentEmail = currentAccountEmail();
+  const accountButton = visibleButtons().find((button) => {
+    const text = (button.innerText || button.textContent || "").toLowerCase();
+    return (currentEmail && text.includes(currentEmail.toLowerCase()))
+      || /account|profile|organization|org/i.test(button.getAttribute("aria-label") || "");
+  }) || visibleButtons().find((button) => {
+    const text = (button.innerText || button.textContent || "").trim();
+    return text.length > 0 && text.length < 80;
+  });
+  if (!accountButton) {
+    await abortAutoSwitch("找不到账号菜单，自动换号已停止");
+    return;
+  }
+  accountButton.click();
+  const logout = await waitForElement(() => visibleButtons().find((button) => (
+    /log out|退出登录/i.test(button.innerText || button.textContent || "")
+  )), 5000);
+  if (!logout) {
+    await abortAutoSwitch("找不到 Log out 按钮，自动换号已停止");
+    return;
+  }
+  logout.click();
+  await saveAutoSwitchState({
+    ...state,
+    phase: "loggingIn",
+    loginStep: "email",
+    lastActionAt: Date.now(),
+    attempts: (state.attempts || 0) + 1
+  });
+  setToolbarStatus("正在切换账号...");
+  setTimeout(() => {
+    if (location.hostname === "app.devin.ai") {
+      location.href = "https://app.devin.ai/auth/login?redirect=%2F";
+    }
+  }, 1200);
+}
+
+async function driveLogin(state) {
+  let accounts;
+  try {
+    accounts = await loadManagedAccounts();
+  } catch (error) {
+    await abortAutoSwitch(error.message);
+    return;
+  }
+  const account = accounts.find((item) => item.email === state.targetEmail);
+  if (!account || !account.email || !account.password) {
+    await abortAutoSwitch("目标账号资料不完整，自动换号已停止");
+    return;
+  }
+  if (state.attempts > 3) {
+    await abortAutoSwitch("登录重试次数过多，自动换号已停止");
+    return;
+  }
+  if (loginErrorVisible()) {
+    await abortAutoSwitch("登录失败，请检查账号密码");
+    return;
+  }
+  if (state.loginStep === "email") {
+    const emailInput = await waitForElement(() => document.querySelector("input[type='email']"));
+    if (!emailInput) {
+      await abortAutoSwitch("找不到邮箱输入框，自动换号已停止");
+      return;
+    }
+    setNativeValue(emailInput, account.email);
+    const submitted = clickButtonContaining("log in") || emailInput.form?.requestSubmit?.();
+    if (!submitted) {
+      await abortAutoSwitch("找不到登录按钮，自动换号已停止");
+      return;
+    }
+    await saveAutoSwitchState({
+      ...state,
+      loginStep: "password",
+      lastActionAt: Date.now()
+    });
+    return;
+  }
+  if (state.loginStep === "password") {
+    const passwordInput = await waitForElement(() => document.querySelector("input[type='password']"), 10000);
+    if (!passwordInput) {
+      await abortAutoSwitch("密码输入框未出现，自动换号已停止");
+      return;
+    }
+    setNativeValue(passwordInput, account.password);
+    const submitted = clickButtonContaining("sign in") || passwordInput.form?.requestSubmit?.();
+    if (!submitted) {
+      await abortAutoSwitch("找不到 Sign in 按钮，自动换号已停止");
+      return;
+    }
+    await saveAutoSwitchState({
+      ...state,
+      loginStep: "submitted",
+      attempts: (state.attempts || 0) + 1,
+      lastActionAt: Date.now()
+    });
+    return;
+  }
+  if (state.loginStep === "submitted"
+      && state.lastActionAt
+      && Date.now() - state.lastActionAt > 15000) {
+    await abortAutoSwitch("登录超时，自动换号已停止");
+  }
+}
+
+async function createContinuationSession(state) {
+  if (state.lastActionAt && Date.now() - state.lastActionAt < 2000) return;
+  const composer = findComposer();
+  if (!composer) {
+    setTimeout(() => createContinuationSession(state).catch((error) => setToolbarStatus(error.message, true)), 800);
+    return;
+  }
+  const stored = await storageGet(["continuationTemplate", "lastHandoff", "autoSendContinuation"]);
+  const text = buildContinuationText(
+    stored.continuationTemplate || DEFAULT_HANDOFF_TEMPLATE,
+    stored.lastHandoff?.text || ""
+  );
+  injectComposerText(text);
+  const shouldSend = stored.autoSendContinuation !== false;
+  if (shouldSend) {
+    const sendButton = await waitForElement(() => {
+      const button = document.querySelector("button[aria-label='Send']");
+      return button && !button.disabled ? button : null;
+    }, 5000);
+    if (!sendButton || !clickSendButton()) {
+      await abortAutoSwitch("续接内容已填入，但找不到可用的 Send 按钮");
+      return;
+    }
+  }
+  await storageSet({ lastUsedAccountEmail: state.targetEmail });
+  await saveAutoSwitchState({
+    ...state,
+    phase: "done",
+    completedAt: new Date().toISOString()
+  });
+  setToolbarStatus(shouldSend ? "已发送续接提示" : "已填入续接提示");
+}
+
+async function exportHandoffForSwitch() {
+  const data = await extractConversation({
+    includeConversation: true,
+    includeWorklog: true,
+    includeChanges: true,
+    includeThoughts: false
+  });
+  const handoff = buildHandoff(data);
+  await storageSet({
+    lastHandoff: {
+      text: handoff,
+      exportedAt: new Date().toISOString(),
+      title: data.title,
+      url: data.url
+    }
+  });
+  return data;
+}
+
+async function beginAutoSwitch(manual = false) {
+  const settings = await storageGet(["autoSwitchEnabled", "lastUsedAccountEmail"]);
+  if (!manual && settings.autoSwitchEnabled !== true) return;
+  const accounts = await loadManagedAccounts();
+  const next = selectNextAccount(accounts, currentAccountEmail(), settings.lastUsedAccountEmail);
+  if (!next) {
+    setToolbarStatus("没有可用的下一个账号", true);
+    return;
+  }
+  if (isSessionPage()) {
+    await exportHandoffForSwitch();
+  }
+  const state = {
+    phase: "loggingOut",
+    targetEmail: next.email,
+    startedAt: new Date().toISOString(),
+    attempts: 0,
+    manual
+  };
+  await saveAutoSwitchState(state);
+  await driveLogout(state);
+}
+
+function isSessionPage() {
+  return /^\/sessions\/[^/]+\/?$/.test(location.pathname);
+}
+
+let autoSwitchRunning = false;
+
+async function runAutoSwitch() {
+  if (autoSwitchRunning) return;
+  autoSwitchRunning = true;
+  try {
+    const settings = await storageGet(["autoSwitchEnabled", "autoSwitchState"]);
+    const state = settings.autoSwitchState || { phase: "idle" };
+    const action = routeAutoSwitch(location.href, state, {
+      enabled: settings.autoSwitchEnabled === true,
+      quotaExceeded: isQuotaExceeded(),
+      loggedOut: !localStorage.getItem("auth1_session")
+    });
+    if (action === "beginSwitch") await beginAutoSwitch(false);
+    if (action === "driveLogout") await driveLogout(state);
+    if (action === "driveLogin") {
+      if (state.phase === "loggingOut") {
+        await saveAutoSwitchState({ ...state, phase: "loggingIn", loginStep: "email" });
+      }
+      await driveLogin({ ...state, phase: "loggingIn", loginStep: state.loginStep || "email" });
+    }
+    if (action === "navigateLogin") {
+      location.href = "https://app.devin.ai/auth/login?redirect=%2F";
+    }
+    if (action === "createSession") {
+      await saveAutoSwitchState({ ...state, phase: "creatingSession" });
+      await createContinuationSession({ ...state, phase: "creatingSession" });
+    }
+    if (action === "done") await saveAutoSwitchState({ ...state, phase: "done" });
+  } catch (error) {
+    await abortAutoSwitch(error.message || "自动换号失败");
+  } finally {
+    autoSwitchRunning = false;
+  }
+}
+
+let accountDraft = [];
+let editingAccountIndex = -1;
+
+function toolbarPhase(state) {
+  const phase = document.getElementById("devin-exporter-phase");
+  if (phase) phase.textContent = `状态：${state?.phase || "idle"}`;
+}
+
+function renderAccountRows() {
+  const list = document.getElementById("devin-account-list");
+  if (!list) return;
+  list.textContent = "";
+  accountDraft.forEach((account, index) => {
+    const row = document.createElement("div");
+    row.className = "devin-account-row";
+    const label = document.createElement("span");
+    label.textContent = `${index + 1}. ${account.label || account.email}`;
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.textContent = "编辑";
+    edit.addEventListener("click", () => {
+      document.getElementById("devin-account-label").value = account.label || "";
+      document.getElementById("devin-account-email").value = account.email || "";
+      document.getElementById("devin-account-password").value = account.password || "";
+      editingAccountIndex = index;
+    });
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "删除";
+    remove.addEventListener("click", () => {
+      accountDraft.splice(index, 1);
+      renderAccountRows();
+    });
+    const up = document.createElement("button");
+    up.type = "button";
+    up.textContent = "上移";
+    up.disabled = index === 0;
+    up.addEventListener("click", () => {
+      [accountDraft[index - 1], accountDraft[index]] = [accountDraft[index], accountDraft[index - 1]];
+      renderAccountRows();
+    });
+    const down = document.createElement("button");
+    down.type = "button";
+    down.textContent = "下移";
+    down.disabled = index === accountDraft.length - 1;
+    down.addEventListener("click", () => {
+      [accountDraft[index], accountDraft[index + 1]] = [accountDraft[index + 1], accountDraft[index]];
+      renderAccountRows();
+    });
+    row.append(label, edit, remove, up, down);
+    list.appendChild(row);
+  });
+}
+
+async function openSettingsPanel() {
+  const panel = document.getElementById("devin-exporter-settings");
+  if (!panel) return;
+  try {
+    accountDraft = await loadManagedAccounts();
+    const values = await storageGet(["accountEncryptionEnabled", "autoSwitchEnabled", "autoSendContinuation"]);
+    panel.querySelector("#devin-encrypt-accounts").checked = values.accountEncryptionEnabled === true;
+    panel.querySelector("#devin-auto-switch").checked = values.autoSwitchEnabled === true;
+    panel.querySelector("#devin-auto-send").checked = values.autoSendContinuation !== false;
+    renderAccountRows();
+    panel.hidden = false;
+  } catch (error) {
+    setToolbarStatus(error.message, true);
+  }
+}
+
+async function saveSettingsPanel() {
+  const panel = document.getElementById("devin-exporter-settings");
+  if (!panel) return;
+  const label = panel.querySelector("#devin-account-label");
+  const email = panel.querySelector("#devin-account-email");
+  const password = panel.querySelector("#devin-account-password");
+  if (email.value.trim() || password.value) {
+    const account = {
+      label: label.value.trim(),
+      email: email.value.trim(),
+      password: password.value
+    };
+    if (!account.email || !account.password) {
+      setToolbarStatus("账号邮箱和密码都必须填写", true);
+      return;
+    }
+    if (editingAccountIndex >= 0) accountDraft[editingAccountIndex] = account;
+    else accountDraft.push(account);
+    editingAccountIndex = -1;
+    label.value = "";
+    email.value = "";
+    password.value = "";
+    renderAccountRows();
+  }
+  const encrypted = panel.querySelector("#devin-encrypt-accounts").checked;
+  await saveManagedAccounts(accountDraft, encrypted);
+  await storageSet({
+    autoSwitchEnabled: panel.querySelector("#devin-auto-switch").checked,
+    autoSendContinuation: panel.querySelector("#devin-auto-send").checked
+  });
+  panel.hidden = true;
+  setToolbarStatus("账号设置已保存");
+}
+
+function addAccountFromPanel() {
+  const panel = document.getElementById("devin-exporter-settings");
+  const label = panel.querySelector("#devin-account-label");
+  const email = panel.querySelector("#devin-account-email");
+  const password = panel.querySelector("#devin-account-password");
+  if (!email.value.trim() || !password.value) {
+    setToolbarStatus("账号邮箱和密码都必须填写", true);
+    return;
+  }
+  const account = {
+    label: label.value.trim(),
+    email: email.value.trim(),
+    password: password.value
+  };
+  if (editingAccountIndex >= 0) accountDraft[editingAccountIndex] = account;
+  else accountDraft.push(account);
+  editingAccountIndex = -1;
+  label.value = "";
+  email.value = "";
+  password.value = "";
+  renderAccountRows();
+  setToolbarStatus("账号已加入列表，请保存设置");
+}
+
+async function exportHandoffInPage() {
+  if (!isSessionPage()) {
+    setToolbarStatus("请先打开 Devin 会话页面", true);
+    return;
+  }
+  try {
+    setToolbarStatus("正在导出 Handoff...");
+    const data = await exportHandoffForSwitch();
+    const text = (await storageGet(["lastHandoff"])).lastHandoff.text;
+    const link = document.createElement("a");
+    link.href = `data:text/markdown;charset=utf-8,${encodeURIComponent(text)}`;
+    link.download = `devin-handoff-${Date.now()}.md`;
+    link.click();
+    setToolbarStatus(`已保存：${data.title || "Handoff"}`);
+  } catch (error) {
+    setToolbarStatus(error.message || "Handoff 导出失败", true);
+  }
+}
+
+function installToolbar() {
+  if (document.getElementById("devin-exporter-toolbar")) return;
+  const style = document.createElement("style");
+  style.id = "devin-exporter-style";
+  style.textContent = `
+    #devin-exporter-toolbar,#devin-exporter-settings{position:fixed;z-index:2147483647;right:18px;bottom:18px;font:13px system-ui,sans-serif;color:#172033}
+    #devin-exporter-toolbar{display:flex;gap:6px;align-items:center;padding:8px;border:1px solid #c9d2e3;border-radius:8px;background:#fff;box-shadow:0 3px 14px #0002}
+    #devin-exporter-toolbar button,#devin-exporter-settings button{border:1px solid #aab7cc;border-radius:5px;background:#f7f9fc;color:#172033;padding:5px 8px;cursor:pointer}
+    #devin-exporter-toolbar button:disabled{cursor:not-allowed;opacity:.5}
+    #devin-exporter-status{max-width:220px;color:#315b8f} #devin-exporter-status[data-error=true]{color:#b3261e}
+    #devin-exporter-phase{font-size:11px;color:#58657a}
+    #devin-exporter-settings{right:18px;bottom:72px;width:440px;max-height:80vh;overflow:auto;padding:12px;border:1px solid #c9d2e3;border-radius:8px;background:#fff;box-shadow:0 3px 14px #0002}
+    #devin-exporter-settings input{box-sizing:border-box;width:100%;margin:3px 0;padding:5px}
+    #devin-exporter-settings textarea{width:100%;height:180px;box-sizing:border-box}
+    .devin-account-row{display:flex;gap:4px;align-items:center;margin:5px 0}.devin-account-row span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .devin-settings-actions{display:flex;gap:5px;margin-top:8px}
+  `;
+  document.documentElement.appendChild(style);
+  const toolbar = document.createElement("div");
+  toolbar.id = "devin-exporter-toolbar";
+  toolbar.innerHTML = `
+    <button id="devin-export-handoff" type="button">导出 Handoff</button>
+    <button id="devin-manual-switch" type="button">换到下一个号</button>
+    <button id="devin-settings-button" type="button">设置</button>
+    <span id="devin-exporter-phase">状态：idle</span>
+    <span id="devin-exporter-status" role="status"></span>
+  `;
+  document.body.appendChild(toolbar);
+  const panel = document.createElement("div");
+  panel.id = "devin-exporter-settings";
+  panel.hidden = true;
+  panel.innerHTML = `
+    <strong>账号管理</strong>
+    <p>账号密码仅用于本地自动登录；建议启用主密码加密。此功能可能触发服务条款、封号和本地密码存储风险，仅支持无 2FA 的邮箱密码账号。</p>
+    <div id="devin-account-list"></div>
+    <input id="devin-account-label" type="text" placeholder="账号标签">
+    <input id="devin-account-email" type="email" placeholder="邮箱">
+    <input id="devin-account-password" type="password" placeholder="密码">
+    <div class="devin-settings-actions"><button id="devin-account-add" type="button">添加/更新账号</button></div>
+    <label><input id="devin-encrypt-accounts" type="checkbox"> 使用主密码加密账号列表</label>
+    <label><input id="devin-auto-switch" type="checkbox"> 启用自动换号</label>
+    <label><input id="devin-auto-send" type="checkbox" checked> 自动发送续接</label>
+    <hr>
+    <strong>续接模板</strong>
+    <textarea id="devin-template" placeholder="续接模板"></textarea>
+    <div class="devin-settings-actions">
+      <button id="devin-save-settings" type="button">保存设置</button>
+      <button id="devin-reset-template" type="button">恢复默认模板</button>
+      <button id="devin-close-settings" type="button">关闭</button>
+    </div>
+  `;
+  document.body.appendChild(panel);
+  toolbar.querySelector("#devin-export-handoff").addEventListener("click", exportHandoffInPage);
+  toolbar.querySelector("#devin-manual-switch").addEventListener("click", () => {
+    beginAutoSwitch(true).catch((error) => setToolbarStatus(error.message, true));
+  });
+  toolbar.querySelector("#devin-settings-button").addEventListener("click", () => {
+    openSettingsPanel().then(async () => {
+      const stored = await storageGet(["continuationTemplate"]);
+      panel.querySelector("#devin-template").value = stored.continuationTemplate || DEFAULT_HANDOFF_TEMPLATE;
+    }).catch((error) => setToolbarStatus(error.message, true));
+  });
+  panel.querySelector("#devin-account-add").addEventListener("click", addAccountFromPanel);
+  panel.querySelector("#devin-save-settings").addEventListener("click", saveSettingsPanel);
+  panel.querySelector("#devin-reset-template").addEventListener("click", () => {
+    panel.querySelector("#devin-template").value = DEFAULT_HANDOFF_TEMPLATE;
+  });
+  panel.querySelector("#devin-close-settings").addEventListener("click", () => {
+    panel.hidden = true;
+  });
+  const templateSave = panel.querySelector("#devin-save-settings");
+  templateSave.addEventListener("click", async () => {
+    await storageSet({ continuationTemplate: panel.querySelector("#devin-template").value });
+  });
+}
+
+function updateToolbar() {
+  const exportButton = document.getElementById("devin-export-handoff");
+  if (exportButton) exportButton.disabled = !isSessionPage();
+  storageGet(["autoSwitchState"]).then((stored) => toolbarPhase(stored.autoSwitchState)).catch(() => {});
+}
+
+if (typeof document !== "undefined" && location.hostname === "app.devin.ai") {
+  installToolbar();
+  updateToolbar();
+  runAutoSwitch().catch((error) => setToolbarStatus(error.message, true));
+  new MutationObserver(() => {
+    installToolbar();
+    updateToolbar();
+  }).observe(document.documentElement, { childList: true, subtree: true });
+  setInterval(() => {
+    installToolbar();
+    updateToolbar();
+    runAutoSwitch().catch((error) => setToolbarStatus(error.message, true));
+  }, 1500);
+}
+
 if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type !== "extractConversation") {
@@ -371,5 +1291,13 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { buildMessages, buildWorklog };
+  module.exports = {
+    buildMessages,
+    buildWorklog,
+    buildHandoff,
+    buildContinuationText,
+    applyHandoff,
+    selectNextAccount,
+    routeAutoSwitch
+  };
 }
