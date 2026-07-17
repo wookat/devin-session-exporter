@@ -39,6 +39,11 @@ it from the GitHub release — no manual reinstall on new versions.
 
 To remove it, run `install/uninstall-windows.ps1` and restart Chrome.
 
+If you don't have administrator rights, use `install/install-windows-user.ps1`
+instead: it writes the same policy under `HKCU` (current Windows user only, no
+UAC prompt) and works the same way, including auto-update. Remove it with
+`install/uninstall-windows-user.ps1`.
+
 **How updates work.** Pushing a commit to `main` with a bumped `version` in
 `manifest.json` triggers `.github/workflows/release-extension.yml`, which packs a
 signed CRX (using the `EXTENSION_CRX_KEY` repo secret) and publishes it plus an
@@ -184,6 +189,10 @@ Chrome 企业策略（自托管、强制安装）把插件装到**本机所有 C
    `mdahidnfandbmeaoegfkiajhjaoehldl`。
 
 卸载：运行 `install/uninstall-windows.ps1` 后重启 Chrome。
+
+没有管理员权限时，改用 `install/install-windows-user.ps1`：它把同样的策略写入
+`HKCU`（仅当前 Windows 用户，无需 UAC），效果一致、同样自动更新。卸载用
+`install/uninstall-windows-user.ps1`。
 
 **更新机制**：向 `main` 推送并把 `manifest.json` 里的 `version` 提升，会触发
 `.github/workflows/release-extension.yml`，用仓库密钥 `EXTENSION_CRX_KEY` 打包
