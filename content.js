@@ -1122,6 +1122,53 @@ function pickEmail(data) {
     || data.account?.email || data.profile?.email || "";
 }
 
+function deepFindEmail(value, depth = 0) {
+  if (depth > 4 || value == null) return "";
+  if (typeof value === "string") {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) ? value : "";
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = deepFindEmail(item, depth + 1);
+      if (found) return found;
+    }
+    return "";
+  }
+  if (typeof value === "object") {
+    for (const field of ["email", "user_email", "emailAddress"]) {
+      const direct = value[field];
+      if (typeof direct === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(direct)) return direct;
+    }
+    for (const key of Object.keys(value)) {
+      const found = deepFindEmail(value[key], depth + 1);
+      if (found) return found;
+    }
+  }
+  return "";
+}
+
+// Devin caches the signed-in user's profile in localStorage; scan it for an
+// email so the current account shows even when no saved account matches.
+function scanLocalStorageEmail() {
+  try {
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index) || "";
+      if (!/user|profile|auth|account|me\b/i.test(key)) continue;
+      const raw = localStorage.getItem(key);
+      if (!raw || !raw.includes("@")) continue;
+      try {
+        const found = deepFindEmail(JSON.parse(raw));
+        if (found) return found;
+      } catch {
+        // Not JSON; skip.
+      }
+    }
+  } catch {
+    // localStorage may be unavailable.
+  }
+  return "";
+}
+
 function currentUserId(authSession) {
   return authSession?.userId || authSession?.uid || authSession?.user_id
     || authSession?.user?.uid || authSession?.user?.id || "";
@@ -1158,6 +1205,11 @@ async function resolveCurrentAccountEmail() {
   if (tokenEmail) {
     currentEmailCache = tokenEmail;
     return tokenEmail;
+  }
+  const cachedEmail = scanLocalStorageEmail();
+  if (cachedEmail) {
+    currentEmailCache = cachedEmail;
+    return cachedEmail;
   }
   let orgId = "";
   try {
