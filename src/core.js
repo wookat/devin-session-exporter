@@ -964,39 +964,101 @@ const AUTO_SWITCH_KEYS = [
   "switchMinBalance"
 ];
 
+function isExtensionContextValid() {
+  try {
+    return Boolean(extensionApi?.runtime?.id);
+  } catch {
+    return false;
+  }
+}
+
 function storageGet(keys = AUTO_SWITCH_KEYS) {
-  if (!extensionApi?.storage?.local) return Promise.resolve({});
-  if (globalThis.browser) return extensionApi.storage.local.get(keys);
+  if (!isExtensionContextValid() || !extensionApi?.storage?.local) return Promise.resolve({});
+  if (globalThis.browser) {
+    try {
+      return Promise.resolve(extensionApi.storage.local.get(keys)).catch((error) => {
+        if (!isExtensionContextValid()) return {};
+        throw error;
+      });
+    } catch (error) {
+      return isExtensionContextValid() ? Promise.reject(error) : Promise.resolve({});
+    }
+  }
   return new Promise((resolve, reject) => {
-    extensionApi.storage.local.get(keys, (result) => {
-      const error = extensionApi.runtime?.lastError;
-      if (error) reject(new Error(error.message));
-      else resolve(result || {});
-    });
+    try {
+      extensionApi.storage.local.get(keys, (result) => {
+        if (!isExtensionContextValid()) {
+          resolve({});
+          return;
+        }
+        const error = extensionApi.runtime?.lastError;
+        if (error) reject(new Error(error.message));
+        else resolve(result || {});
+      });
+    } catch (error) {
+      if (isExtensionContextValid()) reject(error);
+      else resolve({});
+    }
   });
 }
 
 function storageSet(values) {
-  if (!extensionApi?.storage?.local) return Promise.resolve();
-  if (globalThis.browser) return extensionApi.storage.local.set(values);
+  if (!isExtensionContextValid() || !extensionApi?.storage?.local) return Promise.resolve();
+  if (globalThis.browser) {
+    try {
+      return Promise.resolve(extensionApi.storage.local.set(values)).catch((error) => {
+        if (!isExtensionContextValid()) return undefined;
+        throw error;
+      });
+    } catch (error) {
+      return isExtensionContextValid() ? Promise.reject(error) : Promise.resolve();
+    }
+  }
   return new Promise((resolve, reject) => {
-    extensionApi.storage.local.set(values, () => {
-      const error = extensionApi.runtime?.lastError;
-      if (error) reject(new Error(error.message));
+    try {
+      extensionApi.storage.local.set(values, () => {
+        if (!isExtensionContextValid()) {
+          resolve();
+          return;
+        }
+        const error = extensionApi.runtime?.lastError;
+        if (error) reject(new Error(error.message));
+        else resolve();
+      });
+    } catch (error) {
+      if (isExtensionContextValid()) reject(error);
       else resolve();
-    });
+    }
   });
 }
 
 function storageRemove(keys) {
-  if (!extensionApi?.storage?.local) return Promise.resolve();
-  if (globalThis.browser) return extensionApi.storage.local.remove(keys);
+  if (!isExtensionContextValid() || !extensionApi?.storage?.local) return Promise.resolve();
+  if (globalThis.browser) {
+    try {
+      return Promise.resolve(extensionApi.storage.local.remove(keys)).catch((error) => {
+        if (!isExtensionContextValid()) return undefined;
+        throw error;
+      });
+    } catch (error) {
+      return isExtensionContextValid() ? Promise.reject(error) : Promise.resolve();
+    }
+  }
   return new Promise((resolve, reject) => {
-    extensionApi.storage.local.remove(keys, () => {
-      const error = extensionApi.runtime?.lastError;
-      if (error) reject(new Error(error.message));
+    try {
+      extensionApi.storage.local.remove(keys, () => {
+        if (!isExtensionContextValid()) {
+          resolve();
+          return;
+        }
+        const error = extensionApi.runtime?.lastError;
+        if (error) reject(new Error(error.message));
+        else resolve();
+      });
+    } catch (error) {
+      if (isExtensionContextValid()) reject(error);
       else resolve();
-    });
+    }
   });
 }
 
@@ -2704,6 +2766,7 @@ export {
   buildIsolatedSessionUrl,
   selectNextAccount,
   routeAutoSwitch,
+  isExtensionContextValid,
   // Constants.
   DEFAULT_HANDOFF_TEMPLATE,
   DEFAULT_TARGET_USAGE_LIMIT,
