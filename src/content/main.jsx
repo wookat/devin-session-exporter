@@ -30,10 +30,34 @@ if (typeof document !== "undefined" && isAutoSwitchHost) {
     setInterval(() => core.checkForUpdate().catch(() => {}), core.UPDATE_CHECK_INTERVAL_MS);
     setInterval(() => core.refreshBalanceDisplay(), 30000);
     // Devin is an SPA that may swap out the body; keep the React root attached.
-    new MutationObserver(() => ensureRoot()).observe(document.documentElement, {
-      childList: true,
-      subtree: true
-    });
+    let ensureRootScheduled = false;
+    let observedBody = null;
+    const bodyObserver = new MutationObserver(scheduleEnsureRoot);
+    const observeBody = () => {
+      if (document.body && document.body !== observedBody) {
+        bodyObserver.disconnect();
+        observedBody = document.body;
+        bodyObserver.observe(observedBody, { childList: true });
+      }
+    };
+    const runEnsureRoot = () => {
+      ensureRootScheduled = false;
+      ensureRoot();
+      observeBody();
+    };
+    function scheduleEnsureRoot() {
+      if (ensureRootScheduled) {
+        return;
+      }
+      ensureRootScheduled = true;
+      if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(runEnsureRoot);
+      } else {
+        setTimeout(runEnsureRoot, 0);
+      }
+    }
+    new MutationObserver(scheduleEnsureRoot).observe(document.documentElement, { childList: true });
+    observeBody();
   }
   core.runAutoSwitch().catch((error) => core.setToolbarStatus(error.message, true));
   setInterval(() => {
