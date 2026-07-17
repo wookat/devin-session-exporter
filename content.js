@@ -1266,6 +1266,11 @@ function formatBalanceDisplay(info = {}) {
   return `余额 ${balanceText} · 上限 ${limitText}`;
 }
 
+function formatBalanceOnly(info = {}) {
+  const balance = accountAvailableBalance(info);
+  return `余额 ${Number.isFinite(balance) ? `$${balance.toFixed(2)}` : "—"}`;
+}
+
 function balanceToneClass(info = {}) {
   if (/out_of_quota/i.test(info.billingError || "")) return "balance-negative";
   const balance = accountAvailableBalance(info);
@@ -2268,6 +2273,7 @@ async function openSettingsPanel() {
     await Promise.all([loadPersistedBalances(), loadPersistedLatestSessions()]);
     renderAccountRows();
     panel.hidden = false;
+    refreshCurrentAccount().catch((error) => setToolbarStatus(error.message, true));
     refreshStaleAccountMeta().catch((error) => setToolbarStatus(error.message, true));
   } catch (error) {
     setToolbarStatus(error.message, true);
@@ -2415,19 +2421,43 @@ function installToolbar() {
     #devin-exporter-status{max-width:220px;overflow:hidden;color:#9aa4b2;text-overflow:ellipsis;white-space:nowrap}
     #devin-exporter-status[data-error=true]{color:#ff9ba3}
     #devin-exporter-phase{display:none}
-    #devin-exporter-settings{right:16px;bottom:66px;width:min(500px,calc(100vw - 32px));max-height:82vh;overflow:auto;padding:16px 18px;border:1px solid #262b34;border-radius:14px;background:#12161dFA}
-    #devin-exporter-settings h2{margin:0 0 2px;font-size:16px;font-weight:600;color:#f2f4f8}
-    #devin-exporter-settings h3{margin:0 0 8px;font-size:12px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:#8a93a3}
+    #devin-exporter-settings{right:16px;bottom:66px;width:min(440px,calc(100vw - 32px));max-height:82vh;overflow:auto;padding:12px 14px;border:1px solid #262b34;border-radius:14px;background:#12161dFA}
+    #devin-exporter-settings h2{margin:0;font-size:15px;font-weight:600;color:#f2f4f8}
+    #devin-exporter-settings h3{margin:0 0 6px;font-size:11px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:#8a93a3}
     #devin-exporter-settings p{margin:6px 0 10px;font-size:12px;color:#7f8896;line-height:1.5}
+    .devin-settings-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+    .devin-close-x{padding:2px 9px!important;font-size:16px;line-height:1;background:transparent!important;color:#8a93a3}
+    .devin-close-x:hover{color:#e6e9ef}
+    .devin-icon-btn{padding:2px 8px!important;font-size:13px;background:#1e242e}
+    .devin-current{padding:10px 12px;margin-bottom:12px;border:1px solid #20262f;border-radius:10px;background:#171b23}
+    .devin-current-line{display:flex;align-items:center;justify-content:space-between;gap:8px}
+    .devin-current-email{overflow:hidden;font-size:13px;font-weight:600;color:#e6e9ef;text-overflow:ellipsis;white-space:nowrap}
+    .devin-current-meta{margin-top:2px;font-size:12px;color:#aab3c1;font-variant-numeric:tabular-nums}
+    .devin-current-meta.balance-negative{color:#ff9ba3}
+    .devin-current-meta.balance-positive{color:#84dcae}
+    .devin-current-actions{margin-top:8px}
+    .devin-current-actions button{padding:5px 11px;font-size:12px;background:#1e242e}
+    .devin-field-row{display:flex;gap:8px}
+    .devin-field{flex:1;flex-direction:column!important;align-items:stretch!important;gap:3px!important;margin:0!important;font-size:11px;color:#8a93a3}
+    .devin-field input{margin:0!important}
+    .devin-toggle-row{display:flex;flex-wrap:wrap;gap:6px 16px;margin:10px 0 2px}
+    .devin-toggle-row label{margin:0!important;font-size:12px}
+    .devin-details{margin-top:10px}
+    .devin-details summary{cursor:pointer;font-size:12px;color:#8a93a3;list-style:none}
+    .devin-details summary:hover{color:#c1c9d6}
+    .devin-details textarea{height:110px}
+    #devin-exporter-settings button.devin-primary{background:#2f6bff;color:#fff;font-weight:600}
+    #devin-exporter-settings button.devin-primary:hover{background:#4179ff}
     #devin-exporter-settings input[type="number"],#devin-exporter-settings input[type="search"],#devin-exporter-settings input[type="text"],#devin-exporter-settings input[type="password"],#devin-exporter-settings textarea{box-sizing:border-box;width:100%;margin:4px 0;padding:8px 10px;border:1px solid #2a303b;border-radius:8px;background:#0d1117;color:#e6e9ef;outline:none}
     #devin-exporter-settings input[type="checkbox"]{width:16px;height:16px;margin:0;flex:none;accent-color:#2f6bff}
     #devin-exporter-settings input[type="number"]:focus,#devin-exporter-settings input[type="search"]:focus,#devin-exporter-settings textarea:focus{border-color:#2f6bff}
     #devin-exporter-settings textarea{height:130px;resize:vertical}
     #devin-exporter-settings label{display:flex;gap:8px;align-items:center;margin:8px 0;font-size:13px;color:#c1c9d6}
     #devin-exporter-settings label input{width:auto;margin:0}
-    .devin-settings-section{padding:14px 0;border-top:1px solid #20262f}
-    .devin-settings-section:first-of-type{border-top:0;padding-top:4px}
+    .devin-settings-section{padding:12px 0;border-top:1px solid #20262f}
+    .devin-settings-section:first-of-type{border-top:0;padding-top:0}
     .devin-settings-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+    #devin-exporter-settings textarea#devin-batch-accounts{height:64px}
     #devin-account-list{display:flex;flex-direction:column;border:1px solid #20262f;border-radius:10px;overflow:hidden;background:#12161d}
     .devin-account-empty{padding:14px;font-size:12px;color:#7f8896;text-align:center}
     .devin-account-batchbar{display:flex;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid #20262f;background:#171b23}
@@ -2473,38 +2503,54 @@ function installToolbar() {
   panel.id = "devin-exporter-settings";
   panel.hidden = true;
   panel.innerHTML = `
-    <div class="devin-settings-header"><h2>Devin Exporter 设置</h2></div>
-    <section class="devin-settings-section">
-      <h3>账号</h3>
-      <p>添加后自动把用量上限设为目标值并查询余额。密码仅本地保存，建议启用加密；仅支持无 2FA 的邮箱密码账号。</p>
-      <div id="devin-account-list"></div>
-      <textarea id="devin-batch-accounts" placeholder="每行一个账号（可填一条或多条）：邮箱---密码---可选备注"></textarea>
-      <div class="devin-settings-actions"><button id="devin-batch-add" type="button">添加账号</button></div>
-    </section>
-    <section class="devin-settings-section">
-      <h3>余额与切号</h3>
-      <input id="devin-target-limit" type="number" min="0" step="0.01" placeholder="用量上限（美元，默认 200）">
-      <input id="devin-switch-min-balance" type="number" min="0" step="0.01" placeholder="可切号的最低余额（美元，默认 65）">
-      <div class="devin-settings-actions">
-        <button id="devin-apply-limit" type="button">应用上限到当前账号</button>
-        <button id="devin-refresh-all-balances" type="button">刷新全部余额</button>
+    <div class="devin-settings-header">
+      <h2>Devin Exporter</h2>
+      <button id="devin-close-settings" type="button" class="devin-close-x" title="关闭">×</button>
+    </div>
+
+    <div id="devin-current-account" class="devin-current">
+      <div class="devin-current-line">
+        <span class="devin-current-email">未登录</span>
+        <button id="devin-refresh-current" type="button" class="devin-icon-btn" title="刷新">↻</button>
+      </div>
+      <div class="devin-current-meta">余额 — · 上限 —</div>
+      <div class="devin-current-actions">
         <button id="devin-manual-switch" type="button">换到下一个号</button>
       </div>
-    </section>
+    </div>
+
     <section class="devin-settings-section">
-      <h3>自动换号</h3>
-      <label><input id="devin-encrypt-accounts" type="checkbox"> 主密码加密账号列表</label>
-      <label><input id="devin-auto-switch" type="checkbox"> 启用自动换号（仅切余额充足的号）</label>
-      <label><input id="devin-auto-send" type="checkbox" checked> 自动发送续接</label>
-    </section>
-    <section class="devin-settings-section">
-      <h3>续接模板</h3>
-      <textarea id="devin-template" placeholder="续接模板"></textarea>
-      <div class="devin-settings-actions">
-        <button id="devin-save-settings" type="button">保存设置</button>
-        <button id="devin-reset-template" type="button">恢复默认模板</button>
-        <button id="devin-close-settings" type="button">关闭</button>
+      <div class="devin-field-row">
+        <label class="devin-field">用量上限
+          <input id="devin-target-limit" type="number" min="0" step="0.01" placeholder="200">
+        </label>
+        <label class="devin-field">最低可切余额
+          <input id="devin-switch-min-balance" type="number" min="0" step="0.01" placeholder="65">
+        </label>
       </div>
+      <div class="devin-toggle-row">
+        <label><input id="devin-auto-switch" type="checkbox"> 自动换号</label>
+        <label><input id="devin-auto-send" type="checkbox" checked> 自动发送续接</label>
+        <label><input id="devin-encrypt-accounts" type="checkbox"> 加密账号</label>
+      </div>
+      <div class="devin-settings-actions">
+        <button id="devin-apply-limit" type="button">应用上限</button>
+        <button id="devin-save-settings" type="button" class="devin-primary">保存设置</button>
+      </div>
+      <details class="devin-details">
+        <summary>续接模板</summary>
+        <textarea id="devin-template" placeholder="续接模板"></textarea>
+        <div class="devin-settings-actions">
+          <button id="devin-reset-template" type="button">恢复默认模板</button>
+        </div>
+      </details>
+    </section>
+
+    <section class="devin-settings-section">
+      <h3>已保存账号</h3>
+      <div id="devin-account-list"></div>
+      <textarea id="devin-batch-accounts" placeholder="每行一个账号：邮箱---密码---可选备注"></textarea>
+      <div class="devin-settings-actions"><button id="devin-batch-add" type="button">添加账号</button></div>
     </section>
   `;
   document.body.appendChild(panel);
@@ -2523,8 +2569,9 @@ function installToolbar() {
     addBatchAccountsFromPanel().catch((error) => setToolbarStatus(error.message, true));
   });
   panel.querySelector("#devin-apply-limit").addEventListener("click", applyTargetUsageLimit);
-  panel.querySelector("#devin-refresh-all-balances").addEventListener("click", () => {
-    refreshAccountsMeta(accountDraft.slice()).catch((error) => setToolbarStatus(error.message, true));
+  panel.querySelector("#devin-refresh-current").addEventListener("click", () => {
+    refreshCurrentAccount().catch((error) => setToolbarStatus(error.message, true));
+    refreshBalanceDisplay();
   });
   panel.querySelector("#devin-manual-switch").addEventListener("click", () => {
     beginAutoSwitch(true).catch((error) => setToolbarStatus(error.message, true));
@@ -2554,11 +2601,39 @@ async function refreshBalanceDisplay() {
   if (!element) return;
   try {
     const info = await fetchBillingInfo();
-    element.textContent = formatBalanceDisplay(info);
+    element.textContent = formatBalanceOnly(info);
     element.className = balanceToneClass(info);
+    const current = document.getElementById("devin-current-account");
+    if (current && !document.getElementById("devin-exporter-settings")?.hidden) {
+      renderCurrentAccount(current, info);
+    }
   } catch {
     element.textContent = "余额 —";
     element.className = "";
+  }
+}
+
+function renderCurrentAccount(element, info) {
+  const email = currentAccountEmail() || "未登录";
+  element.querySelector(".devin-current-email").textContent = email;
+  const meta = element.querySelector(".devin-current-meta");
+  if (info) {
+    meta.textContent = formatBalanceDisplay(info);
+    meta.className = `devin-current-meta ${balanceToneClass(info)}`;
+  } else {
+    meta.textContent = "余额 — · 上限 —";
+    meta.className = "devin-current-meta";
+  }
+}
+
+async function refreshCurrentAccount() {
+  const element = document.getElementById("devin-current-account");
+  if (!element) return;
+  renderCurrentAccount(element, null);
+  try {
+    renderCurrentAccount(element, await fetchBillingInfo());
+  } catch {
+    renderCurrentAccount(element, null);
   }
 }
 
@@ -2616,6 +2691,7 @@ if (typeof module !== "undefined") {
     applyHandoff,
     buildUsageLimitBody,
     formatBalanceDisplay,
+    formatBalanceOnly,
     accountAvailableBalance,
     balanceToneClass,
     parseBatchAccounts,
