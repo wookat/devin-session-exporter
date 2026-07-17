@@ -438,10 +438,10 @@ async function exportListedSessionHandoff(session, auth) {
     title: session.title,
     exportedAt: new Date().toISOString(),
     orgId: auth.orgId,
-    messages: buildMessages(events, {}),
+    messages: await inlineAttachments(buildMessages(events, {}), auth.token, auth.orgId),
     worklog: buildWorklog(events)
   };
-  return buildHandoff(data, { includeFullConversation: true });
+  return buildHandoff(data, { includeFullConversation: false });
 }
 
 function buildVauthPayload(auth) {
@@ -671,18 +671,140 @@ function collapsePriorHandoff(value) {
   return prefix ? `${prefix}\n${HANDOFF_COLLAPSE_PLACEHOLDER}` : HANDOFF_COLLAPSE_PLACEHOLDER;
 }
 
+const ATTACHMENT_MARKER_RE = /ATTACHMENT:(\{[^\n]*?\}|"[^"\n]*"|https?:\/\/\S+)/g;
+const TEXT_ATTACHMENT_EXT = /\.(?:md|markdown|txt|text|json|log|csv|tsv|ya?ml|diff|patch|xml|html?)(?:\?|$)/i;
+const MAX_INLINE_ATTACHMENT_BYTES = 100 * 1024;
+const CLUSTER_SIGNATURE = /tailscale/i;
+const CLUSTER_SIGNATURE_2 = /\bsgpu\b/i;
+const CLUSTER_COLLAPSE_PLACEHOLDER = "[集群接入说明：与前述模板相同，已折叠。见续接模板 / xu-1]";
+
+function parseAttachmentMarker(marker) {
+  const payload = String(marker).slice("ATTACHMENT:".length).trim();
+  if (payload.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(payload);
+      return { url: String(parsed.url || ""), fileSize: Number(parsed.fileSize) };
+    } catch {
+      return { url: "", fileSize: NaN };
+    }
+  }
+  if (payload.startsWith("\"")) {
+    try {
+      return { url: String(JSON.parse(payload) || ""), fileSize: NaN };
+    } catch {
+      return { url: "", fileSize: NaN };
+    }
+  }
+  return { url: payload, fileSize: NaN };
+}
+
+function attachmentName(url) {
+  try {
+    const last = String(url).split("/").pop().split("?")[0];
+    return decodeURIComponent(last) || "attachment";
+  } catch {
+    return "attachment";
+  }
+}
+
+function attachmentNote(url, fileSize) {
+  const name = attachmentName(url);
+  const size = Number.isFinite(fileSize) ? ` · ${Math.max(1, Math.round(fileSize / 1024))}KB` : "";
+  return `[附件已省略：${name}${size}]`;
+}
+
+function summarizeAttachmentMarkers(value) {
+  return String(value || "")
+    .replace(ATTACHMENT_MARKER_RE, (marker) => {
+      const { url, fileSize } = parseAttachmentMarker(marker);
+      return url ? attachmentNote(url, fileSize) : "";
+    })
+    .replace(/\n{3,}/g, "\n\n");
+}
+
+async function fetchAttachmentText(url, token, orgId) {
+  const attempts = [{ credentials: "include" }];
+  if (token) attempts.push({ headers: apiHeaders(token, orgId), credentials: "omit" });
+  for (const init of attempts) {
+    try {
+      const response = await fetch(url, init);
+      if (!response.ok) continue;
+      const text = await response.text();
+      return text.length > MAX_INLINE_ATTACHMENT_BYTES
+        ? `${text.slice(0, MAX_INLINE_ATTACHMENT_BYTES)}\n…（已截断）`
+        : text;
+    } catch {
+      // Try the next auth strategy.
+    }
+  }
+  return null;
+}
+
+async function inlineAttachmentsInText(value, token, orgId) {
+  const text = String(value || "");
+  const markers = text.match(ATTACHMENT_MARKER_RE);
+  if (!markers) return text;
+  let result = text;
+  for (const marker of markers) {
+    const { url, fileSize } = parseAttachmentMarker(marker);
+    let replacement = "";
+    if (url && TEXT_ATTACHMENT_EXT.test(url)
+      && (!Number.isFinite(fileSize) || fileSize <= MAX_INLINE_ATTACHMENT_BYTES)) {
+      const content = await fetchAttachmentText(url, token, orgId);
+      const name = attachmentName(url);
+      replacement = content != null
+        ? `\n\n<附件 ${name}>\n${content.trim()}\n</附件 ${name}>\n`
+        : `[附件（抓取失败）：${name}]`;
+    } else if (url) {
+      replacement = attachmentNote(url, fileSize);
+    }
+    result = result.replace(marker, replacement);
+  }
+  return result.replace(/\n{3,}/g, "\n\n");
+}
+
+async function inlineAttachments(messages, token, orgId) {
+  const out = [];
+  for (const message of Array.isArray(messages) ? messages : []) {
+    out.push({ ...message, text: await inlineAttachmentsInText(message.text, token, orgId) });
+  }
+  return out;
+}
+
+function collapseNoise(value, options = {}) {
+  const maxLen = Number.isFinite(options.maxLen) ? options.maxLen : 1500;
+  const seen = options.seen instanceof Set ? options.seen : null;
+  let text = summarizeAttachmentMarkers(collapsePriorHandoff(value)).trim();
+  if (seen && CLUSTER_SIGNATURE.test(text) && CLUSTER_SIGNATURE_2.test(text) && text.length > 400) {
+    if (seen.has("cluster")) {
+      return CLUSTER_COLLAPSE_PLACEHOLDER;
+    }
+    seen.add("cluster");
+  }
+  if (text.length > maxLen) {
+    text = `${text.slice(0, maxLen).trimEnd()}\n…（已截断，完整历史见 xu-1）`;
+  }
+  return text;
+}
+
+function summarizeTodos(todos) {
+  const list = Array.isArray(todos) ? todos : [];
+  const done = list.filter((todo) => todo.status === "completed").length;
+  const inProgress = list.filter((todo) => todo.status === "in_progress").length;
+  const pending = list.filter((todo) => todo.status && todo.status !== "completed" && todo.status !== "in_progress").length;
+  return { total: list.length, done, inProgress, pending };
+}
+
 function buildHandoff(data, options = {}) {
   const messages = Array.isArray(data.messages) ? data.messages : [];
   const worklog = Array.isArray(data.worklog) ? data.worklog : [];
-  const collapsedMessages = messages.map((message) => (
-    message.role === "user"
-      ? { ...message, text: collapsePriorHandoff(message.text) }
-      : message
-  ));
-  const users = collapsedMessages.filter((message) => message.role === "user");
-  const decisions = messages.filter((message) => (
-    message.role === "devin" && message.type === "devin_message"
-  ));
+  const seenBlocks = new Set();
+  const users = messages
+    .filter((message) => message.role === "user")
+    .map((message) => ({ ...message, text: collapseNoise(message.text, { maxLen: 800, seen: seenBlocks }) }));
+  const decisions = messages
+    .filter((message) => message.role === "devin" && message.type === "devin_message")
+    .map((message) => ({ ...message, text: collapseNoise(message.text, { maxLen: 1500 }) }));
   const latestTodos = [...worklog].reverse().find((entry) => entry.kind === "todos");
   const files = [...new Set(worklog
     .filter((entry) => entry.kind === "file" && entry.action !== "read" && entry.path)
@@ -709,12 +831,25 @@ function buildHandoff(data, options = {}) {
     if (entry.kind === "search") return `Search ${entry.regex || ""} in ${entry.path || "unknown path"}`;
     return handoffSafeText(entry.text || entry.kind);
   });
+  const todos = latestTodos && Array.isArray(latestTodos.todos) ? latestTodos.todos : [];
+  const stats = summarizeTodos(todos);
+  const nextSteps = todos.filter((todo) => todo.status !== "completed").slice(0, 5);
+  const objective = users.length ? handoffSafeText(users[0].text).replace(/\s+/g, " ").slice(0, 240) : "";
   const lines = [
     "# Devin Context Handoff",
     "",
     `Source session: ${data.title || "Devin session"}`,
     `Source URL: ${data.url || ""}`,
     `Exported at: ${data.exportedAt || ""}`,
+    "",
+    "## TL;DR（先读这里）",
+    `- 目标：${objective || "（未捕获用户消息）"}`,
+    `- 进度：${stats.done}/${stats.total} 完成` + (stats.inProgress ? ` · 进行中 ${stats.inProgress}` : "") + (stats.pending ? ` · 待办 ${stats.pending}` : ""),
+    "- 下一步：",
+    ...(nextSteps.length
+      ? nextSteps.map((todo) => `  - [ ] ${handoffSafeText(todo.content)}`)
+      : ["  - （无未完成 TODO；见下方决策/最近动作）"]),
+    "- 全量历史在 xu-1 的 ~/wookat 与 CONTINUATION.md；本文件只带最近增量。",
     "",
     "## Continuity",
     "Full cross-session history lives on xu-1 at ~/wookat and CONTINUATION.md.",
@@ -728,8 +863,8 @@ function buildHandoff(data, options = {}) {
     ...(decisions.length ? decisions.map((message) => `- ${handoffSafeText(message.text)}`) : ["No Devin conclusions captured."]),
     "",
     "## Current status",
-    ...(latestTodos && Array.isArray(latestTodos.todos)
-      ? latestTodos.todos.map((todo) => `- ${todo.status === "completed" ? "[x]" : "[ ]"} ${handoffSafeText(todo.content)}`)
+    ...(todos.length
+      ? todos.map((todo) => `- ${todo.status === "completed" ? "[x]" : "[ ]"} ${handoffSafeText(todo.content)}`)
       : ["No todo state captured."]),
     "",
     "## Environment and how to resume",
@@ -741,10 +876,14 @@ function buildHandoff(data, options = {}) {
     "## Recent major actions",
     ...(majorText.length ? majorText.map((item) => `- ${item}`) : ["No major actions captured."])
   ];
-  if (options.includeFullConversation !== false) {
+  if (options.includeFullConversation === true) {
     lines.push("", "## Full conversation", "The following messages are the complete captured conversation:", "");
-    for (const message of collapsedMessages) {
-      lines.push(`### ${message.role === "user" ? "User" : "Devin"}`, handoffSafeText(message.text), "");
+    for (const message of messages) {
+      lines.push(
+        `### ${message.role === "user" ? "User" : "Devin"}`,
+        collapseNoise(message.text, { maxLen: Number.POSITIVE_INFINITY }),
+        ""
+      );
     }
   }
   return `${lines.join("\n").trimEnd()}\n`;
@@ -1304,18 +1443,21 @@ async function exportHandoffForSwitch(options = {}) {
     includeChanges: true,
     includeThoughts: false
   });
-  const handoff = buildHandoff(data, {
-    includeFullConversation: options.includeFullConversation === true
-  });
+  const token = (readAuthSession() || {}).token || null;
+  data.messages = await inlineAttachments(data.messages, token, data.orgId);
+  const compact = buildHandoff(data, { includeFullConversation: false });
   await storageSet({
     lastHandoff: {
-      text: handoff,
+      text: compact,
       exportedAt: new Date().toISOString(),
       title: data.title,
       url: data.url
     }
   });
-  return data;
+  const full = options.includeFullConversation === true
+    ? buildHandoff(data, { includeFullConversation: true })
+    : null;
+  return { data, compact, full };
 }
 
 async function beginAutoSwitch(manual = false) {
@@ -1850,8 +1992,8 @@ async function exportHandoffInPage() {
   }
   try {
     setToolbarStatus("正在导出 Handoff...");
-    const data = await exportHandoffForSwitch({ includeFullConversation: true });
-    const text = (await storageGet(["lastHandoff"])).lastHandoff.text;
+    const { data, compact, full } = await exportHandoffForSwitch({ includeFullConversation: true });
+    const text = full || compact;
     const link = document.createElement("a");
     link.href = `data:text/markdown;charset=utf-8,${encodeURIComponent(text)}`;
     link.download = `devin-handoff-${Date.now()}.md`;
@@ -2063,6 +2205,10 @@ if (typeof module !== "undefined") {
     buildMessages,
     buildWorklog,
     buildHandoff,
+    collapseNoise,
+    summarizeAttachmentMarkers,
+    inlineAttachmentsInText,
+    summarizeTodos,
     buildContinuationText,
     applyHandoff,
     buildUsageLimitBody,
