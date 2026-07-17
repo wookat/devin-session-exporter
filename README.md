@@ -42,6 +42,19 @@ To remove it, double-click `install/uninstall-windows.cmd` and restart Chrome.
 `install-windows-user.ps1` — the latter is a no-admin `HKCU` variant — are also
 available.)
 
+> **Note:** Chrome only force-installs *Web Store* extensions via local policy.
+> A self-hosted extension is blocked (`[BLOCKED]` in `chrome://policy`) unless the
+> machine is enterprise-managed (domain-joined or Chrome Browser Cloud
+> Management). On a personal machine, use the load-unpacked method below instead.
+
+### Load-unpacked install (no store, no admin, personal machines)
+
+`install/load-unpacked-windows.cmd` downloads the latest extension to a fixed
+folder (`%LOCALAPPDATA%\DevinSessionExporter`) and opens `chrome://extensions`.
+Once per profile: turn on **Developer mode** → **Load unpacked** → pick that
+folder. To update later, run `install/update-unpacked-windows.cmd` and restart
+Chrome — no need to re-add it.
+
 **How updates work.** Pushing a commit to `main` with a bumped `version` in
 `manifest.json` triggers `.github/workflows/release-extension.yml`, which packs a
 signed CRX (using the `EXTENSION_CRX_KEY` repo secret) and publishes it plus an
@@ -189,6 +202,17 @@ Chrome 企业策略（自托管、强制安装）把插件装到**本机所有 C
 
 （也提供 PowerShell 版 `install/install-windows.ps1`，以及免管理员的 `HKCU` 版
 `install-windows-user.ps1`。）
+
+> **注意**：Chrome 只允许通过本机策略强制安装**应用商店**里的扩展；自托管扩展会被
+> 拦截（`chrome://policy` 里显示 `[BLOCKED]`），除非机器被企业纳管（加域 / Chrome
+> 云管理）。个人电脑请改用下面的「加载已解压」方式。
+
+### 加载已解压安装（不走商店、免管理员、适合个人电脑）
+
+`install/load-unpacked-windows.cmd` 会把最新插件下载到固定目录
+（`%LOCALAPPDATA%\DevinSessionExporter`）并打开 `chrome://extensions`。每个 profile
+点一次：打开**开发者模式** →「加载已解压」→ 选该目录。之后更新只需运行
+`install/update-unpacked-windows.cmd` 再重启 Chrome，无需重新添加。
 
 **更新机制**：向 `main` 推送并把 `manifest.json` 里的 `version` 提升，会触发
 `.github/workflows/release-extension.yml`，用仓库密钥 `EXTENSION_CRX_KEY` 打包
