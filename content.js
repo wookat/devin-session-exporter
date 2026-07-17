@@ -807,6 +807,25 @@ function buildHandoff(data, options = {}) {
     if (entry.kind === "search") return `Search ${entry.regex || ""} in ${entry.path || "unknown path"}`;
     return handoffSafeText(entry.text || entry.kind);
   });
+  const opKinds = new Set(["command", "file", "search"]);
+  const formatOp = (entry) => {
+    const time = entry.timestamp ? `[${entry.timestamp}] ` : "";
+    if (entry.kind === "command") {
+      const running = entry.completedAt == null && entry.exitCode == null;
+      const tail = running
+        ? "  ⏳（进行中/在此中断，尚未返回结果）"
+        : (entry.exitCode != null ? `  → 退出码 ${entry.exitCode}` : "");
+      return `${time}$ ${handoffSafeText(entry.command)}${tail}`;
+    }
+    if (entry.kind === "file") {
+      return `${time}${entry.action === "read" ? "读取" : "编辑"} ${entry.path || "unknown file"}`;
+    }
+    return `${time}搜索 ${entry.regex || ""} 于 ${entry.path || "unknown path"}`;
+  };
+  const recentOps = worklog.filter((entry) => opKinds.has(entry.kind)).slice(-20);
+  const runningOps = worklog.filter((entry) => (
+    entry.kind === "command" && entry.completedAt == null && entry.exitCode == null && entry.command
+  ));
   const todos = latestTodos && Array.isArray(latestTodos.todos) ? latestTodos.todos : [];
   const stats = summarizeTodos(todos);
   const nextSteps = todos.filter((todo) => todo.status !== "completed").slice(0, 5);
@@ -850,7 +869,17 @@ function buildHandoff(data, options = {}) {
     ...(files.length ? files.map((file) => `- ${file}`) : ["No file edits captured."]),
     "",
     "## Recent major actions",
-    ...(majorText.length ? majorText.map((item) => `- ${item}`) : ["No major actions captured."])
+    ...(majorText.length ? majorText.map((item) => `- ${item}`) : ["No major actions captured."]),
+    "",
+    "## 最近操作步骤（含进行中）",
+    ...(recentOps.length
+      ? recentOps.map((entry) => `- ${formatOp(entry)}`)
+      : ["No operations captured."]),
+    "",
+    "## 中断点（上个会话停在这一步）",
+    ...(runningOps.length
+      ? runningOps.map((entry) => `- ${formatOp(entry)}`)
+      : ["- 无进行中的命令；上个会话应已跑完最后一步（见上方最近操作步骤）。"])
   ];
   if (options.includeFullConversation === true) {
     lines.push("", "## Full conversation", "The following messages are the complete captured conversation:", "");
