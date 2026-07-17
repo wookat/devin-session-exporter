@@ -1789,25 +1789,178 @@ function isFreshBalance(info) {
     && Date.now() - info.fetchedAt < BALANCE_STALE_MS;
 }
 
-async function refreshStaleAccountBalances() {
-  for (const account of accountDraft) {
-    if (isFreshBalance(accountBalanceCache.get(accountKey(account)))) continue;
-    await queryAccountBalance(account);
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-}
-
-async function refreshAllAccountBalances() {
-  for (const account of accountDraft) {
-    await queryAccountBalance(account);
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-}
-
 const accountSessionsCache = new Map();
+const accountLatestCache = new Map();
+const selectedAccountKeys = new Set();
+const LATEST_STORAGE_KEY = "accountLatestSessions";
+const SESSION_STATUS_LABELS = {
+  running: "正在运行",
+  working: "正在运行",
+  in_progress: "正在运行",
+  blocked: "等待输入",
+  waiting: "等待输入",
+  finished: "已完成",
+  completed: "已完成",
+  done: "已完成",
+  stopped: "已停止",
+  expired: "已过期",
+  failed: "失败"
+};
 
 function accountKey(account) {
   return String(account?.email || "").trim().toLowerCase();
+}
+
+function createButton(text, handler, className) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = text;
+  if (className) button.className = className;
+  if (handler) button.addEventListener("click", handler);
+  return button;
+}
+
+function pickLatestSession(sessions) {
+  if (!Array.isArray(sessions) || !sessions.length) return null;
+  const time = (session) => {
+    const parsed = Date.parse(session.updatedAt || session.createdAt || "");
+    return Number.isFinite(parsed) ? parsed : -Infinity;
+  };
+  return [...sessions].sort((left, right) => time(right) - time(left))[0];
+}
+
+function formatSessionStatus(status) {
+  const key = String(status || "").trim().toLowerCase();
+  return SESSION_STATUS_LABELS[key] || status || "状态未知";
+}
+
+async function loadPersistedLatestSessions() {
+  try {
+    const stored = await storageGet([LATEST_STORAGE_KEY]);
+    const saved = stored[LATEST_STORAGE_KEY];
+    if (saved && typeof saved === "object") {
+      for (const [key, info] of Object.entries(saved)) {
+        if (info && typeof info === "object" && !accountLatestCache.has(key)) {
+          accountLatestCache.set(key, info);
+        }
+      }
+    }
+  } catch {
+    // Missing/corrupt persisted sessions are non-fatal.
+  }
+}
+
+async function persistLatestSessions() {
+  const saved = {};
+  for (const [key, info] of accountLatestCache.entries()) {
+    if (info && !info.loading && !info.error) saved[key] = info;
+  }
+  try {
+    await storageSet({ [LATEST_STORAGE_KEY]: saved });
+  } catch {
+    // Best-effort.
+  }
+}
+
+// Logs in once per account, then fills both the balance and latest-session
+// caches so a panel refresh does not double the number of background logins.
+async function refreshAccountMeta(account, options = {}) {
+  const key = accountKey(account);
+  if (!key) return;
+  const prevBalance = accountBalanceCache.get(key);
+  accountBalanceCache.set(key, { loading: true });
+  accountLatestCache.set(key, { loading: true });
+  renderAccountRows();
+  try {
+    const auth = await resolveAccountAuth(account.email, account.password);
+    if (Number.isFinite(options.provisionLimit) && options.provisionLimit >= 0) {
+      try {
+        await setUsageLimit(options.provisionLimit, { orgId: auth.orgId, token: auth.token });
+      } catch {
+        // Balance/session info is still useful even if the limit update fails.
+      }
+    }
+    const [balanceResult, sessionsResult] = await Promise.allSettled([
+      fetchBalanceForAuth(auth),
+      fetchSessionsForToken(auth.token, auth.orgId)
+    ]);
+    if (balanceResult.status === "fulfilled") {
+      const info = balanceResult.value;
+      info.fetchedAt = Date.now();
+      accountBalanceCache.set(key, info);
+    } else {
+      accountBalanceCache.set(key, isUsableBalance(prevBalance)
+        ? { ...prevBalance, staleError: balanceResult.reason?.message || "刷新失败" }
+        : { error: balanceResult.reason?.message || "无法查询余额" });
+    }
+    if (sessionsResult.status === "fulfilled") {
+      const latest = pickLatestSession(sessionsResult.value);
+      accountLatestCache.set(key, {
+        session: latest ? { sessionId: latest.sessionId, title: latest.title, status: latest.status } : null,
+        fetchedAt: Date.now()
+      });
+    } else {
+      accountLatestCache.set(key, { error: sessionsResult.reason?.message || "会话读取失败" });
+    }
+    renderAccountRows();
+    await Promise.all([persistBalances(), persistLatestSessions()]);
+  } catch (error) {
+    const message = error.message || "登录失败";
+    accountBalanceCache.set(key, isUsableBalance(prevBalance)
+      ? { ...prevBalance, staleError: message }
+      : { error: message });
+    accountLatestCache.set(key, { error: message });
+    renderAccountRows();
+  }
+}
+
+async function refreshAccountsMeta(accounts) {
+  for (const account of Array.isArray(accounts) ? accounts : []) {
+    await refreshAccountMeta(account);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+}
+
+async function refreshStaleAccountMeta() {
+  for (const account of accountDraft) {
+    const key = accountKey(account);
+    const balanceFresh = isFreshBalance(accountBalanceCache.get(key));
+    const latest = accountLatestCache.get(key);
+    const latestFresh = latest && !latest.loading && !latest.error
+      && Number.isFinite(latest.fetchedAt) && Date.now() - latest.fetchedAt < BALANCE_STALE_MS;
+    if (balanceFresh && latestFresh) continue;
+    await refreshAccountMeta(account);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+}
+
+async function deleteSelectedAccounts() {
+  if (!selectedAccountKeys.size) {
+    setToolbarStatus("请先勾选要删除的账号", true);
+    return;
+  }
+  const removed = selectedAccountKeys.size;
+  accountDraft = accountDraft.filter((account) => {
+    const key = accountKey(account);
+    if (selectedAccountKeys.has(key)) {
+      accountBalanceCache.delete(key);
+      accountSessionsCache.delete(key);
+      accountLatestCache.delete(key);
+      return false;
+    }
+    return true;
+  });
+  selectedAccountKeys.clear();
+  renderAccountRows();
+  const panel = document.getElementById("devin-exporter-settings");
+  const encrypted = panel?.querySelector("#devin-encrypt-accounts")?.checked === true;
+  try {
+    await saveManagedAccounts(accountDraft, encrypted);
+    await Promise.all([persistBalances(), persistLatestSessions()]);
+    setToolbarStatus(`已删除 ${removed} 个账号`);
+  } catch (error) {
+    setToolbarStatus(error.message || "删除后保存失败", true);
+  }
 }
 
 async function toggleAccountSessions(account) {
@@ -1929,46 +2082,110 @@ function toolbarPhase(state) {
   if (phase) phase.textContent = `状态：${state?.phase || "idle"}`;
 }
 
+function formatLatestSession(info) {
+  if (!info) return "最新会话：—";
+  if (info.loading) return "最新会话：查询中…";
+  if (info.error) return `最新会话：${info.error}`;
+  if (!info.session) return "最新会话：无";
+  return `最新会话：${info.session.title} · ${formatSessionStatus(info.session.status)}`;
+}
+
+function renderAccountBatchBar(list) {
+  const total = accountDraft.length;
+  const selected = accountDraft.filter((account) => selectedAccountKeys.has(accountKey(account))).length;
+  const bar = document.createElement("div");
+  bar.className = "devin-account-batchbar";
+
+  const selectAllLabel = document.createElement("label");
+  selectAllLabel.className = "devin-batch-selectall";
+  const selectAll = document.createElement("input");
+  selectAll.type = "checkbox";
+  selectAll.checked = total > 0 && selected === total;
+  selectAll.indeterminate = selected > 0 && selected < total;
+  selectAll.addEventListener("change", () => {
+    selectedAccountKeys.clear();
+    if (selectAll.checked) accountDraft.forEach((account) => selectedAccountKeys.add(accountKey(account)));
+    renderAccountRows();
+  });
+  const selectAllText = document.createElement("span");
+  selectAllText.textContent = selected ? `已选 ${selected}/${total}` : `共 ${total} 个账号`;
+  selectAllLabel.append(selectAll, selectAllText);
+
+  const refresh = createButton(selected ? "刷新选中余额" : "刷新全部余额", () => {
+    const targets = selected
+      ? accountDraft.filter((account) => selectedAccountKeys.has(accountKey(account)))
+      : accountDraft.slice();
+    refreshAccountsMeta(targets).catch((error) => setToolbarStatus(error.message, true));
+  });
+  const del = createButton("删除选中", () => {
+    deleteSelectedAccounts().catch((error) => setToolbarStatus(error.message, true));
+  });
+  del.disabled = !selected;
+
+  bar.append(selectAllLabel, refresh, del);
+  list.appendChild(bar);
+}
+
 function renderAccountRows() {
   const list = document.getElementById("devin-account-list");
   if (!list) return;
   list.textContent = "";
+  if (!accountDraft.length) {
+    const empty = document.createElement("div");
+    empty.className = "devin-account-empty";
+    empty.textContent = "还没有账号，在下方文本框添加。";
+    list.appendChild(empty);
+    return;
+  }
+  renderAccountBatchBar(list);
   accountDraft.forEach((account, index) => {
     const key = accountKey(account);
     const row = document.createElement("div");
     row.className = "devin-account-row";
-    const top = document.createElement("div");
-    top.className = "devin-account-top";
+
+    const main = document.createElement("div");
+    main.className = "devin-account-main";
+    const select = document.createElement("input");
+    select.type = "checkbox";
+    select.className = "devin-account-select";
+    select.checked = selectedAccountKeys.has(key);
+    select.addEventListener("change", () => {
+      if (select.checked) selectedAccountKeys.add(key);
+      else selectedAccountKeys.delete(key);
+      renderAccountRows();
+    });
     const identity = document.createElement("div");
     identity.className = "devin-account-identity";
-    const label = document.createElement("strong");
-    label.textContent = `${index + 1}. ${account.label || account.email}`;
-    const email = document.createElement("span");
-    email.textContent = account.email;
-    identity.append(label, email);
+    const name = document.createElement("strong");
+    name.textContent = `${index + 1}. ${account.label || account.email}`;
+    name.title = account.email;
+    identity.appendChild(name);
+    if (account.label && account.label !== account.email) {
+      const email = document.createElement("span");
+      email.textContent = account.email;
+      identity.appendChild(email);
+    }
     const balance = document.createElement("span");
     const balanceInfo = accountBalanceCache.get(key);
     balance.className = `devin-account-balance ${accountBalanceClass(balanceInfo)}`;
     balance.textContent = formatAccountBalance(balanceInfo);
-    top.append(identity, balance);
+    main.append(select, identity, balance);
+
+    const meta = document.createElement("div");
+    meta.className = "devin-account-meta";
+    meta.textContent = formatLatestSession(accountLatestCache.get(key));
 
     const actions = document.createElement("div");
     actions.className = "devin-account-actions";
-    const makeButton = (text, handler, extraClass) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.textContent = text;
-      if (extraClass) button.className = extraClass;
-      button.addEventListener("click", handler);
-      return button;
-    };
     const sessionsState = accountSessionsCache.get(key);
     actions.append(
-      makeButton("查余额", () => queryAccountBalance(account)),
-      makeButton(sessionsState?.expanded ? "收起会话" : "会话", () => {
+      createButton("刷新", () => {
+        refreshAccountMeta(account).catch((error) => setToolbarStatus(error.message, true));
+      }),
+      createButton(sessionsState?.expanded ? "收起会话" : "会话", () => {
         toggleAccountSessions(account).catch((error) => setToolbarStatus(error.message, true));
       }),
-      makeButton("编辑", () => {
+      createButton("编辑", () => {
         const textarea = document.getElementById("devin-batch-accounts");
         if (textarea) {
           const parts = [account.email || "", account.password || ""];
@@ -1978,26 +2195,24 @@ function renderAccountRows() {
         }
         setToolbarStatus("已填入文本框，修改后点「添加账号」按相同邮箱更新");
       }),
-      makeButton("删除", () => {
-        accountBalanceCache.delete(key);
-        accountSessionsCache.delete(key);
-        accountDraft.splice(index, 1);
-        renderAccountRows();
+      createButton("删除", () => {
+        selectedAccountKeys.add(key);
+        deleteSelectedAccounts().catch((error) => setToolbarStatus(error.message, true));
       })
     );
-    const up = makeButton("↑", () => {
+    const up = createButton("↑", () => {
       [accountDraft[index - 1], accountDraft[index]] = [accountDraft[index], accountDraft[index - 1]];
       renderAccountRows();
     });
     up.disabled = index === 0;
-    const down = makeButton("↓", () => {
+    const down = createButton("↓", () => {
       [accountDraft[index], accountDraft[index + 1]] = [accountDraft[index + 1], accountDraft[index]];
       renderAccountRows();
     });
     down.disabled = index === accountDraft.length - 1;
     actions.append(up, down);
 
-    row.append(top, actions);
+    row.append(main, meta, actions);
     renderAccountSessions(row, account);
     list.appendChild(row);
   });
@@ -2024,10 +2239,11 @@ async function openSettingsPanel() {
     panel.querySelector("#devin-switch-min-balance").value = Number.isFinite(Number(values.switchMinBalance))
       ? Number(values.switchMinBalance)
       : DEFAULT_SWITCH_MIN_BALANCE;
-    await loadPersistedBalances();
+    selectedAccountKeys.clear();
+    await Promise.all([loadPersistedBalances(), loadPersistedLatestSessions()]);
     renderAccountRows();
     panel.hidden = false;
-    refreshStaleAccountBalances().catch((error) => setToolbarStatus(error.message, true));
+    refreshStaleAccountMeta().catch((error) => setToolbarStatus(error.message, true));
   } catch (error) {
     setToolbarStatus(error.message, true);
   }
@@ -2062,7 +2278,10 @@ async function addBatchAccountsFromPanel() {
   const result = mergeBatchAccounts(accountDraft, textarea.value);
   accountDraft = result.accounts;
   const added = accountDraft.filter((account) => !before.has(accountKey(account)));
-  for (const account of added) accountBalanceCache.delete(accountKey(account));
+  for (const account of added) {
+    accountBalanceCache.delete(accountKey(account));
+    accountLatestCache.delete(accountKey(account));
+  }
   textarea.value = "";
   renderAccountRows();
   try {
@@ -2077,7 +2296,7 @@ async function addBatchAccountsFromPanel() {
   setToolbarStatus(`已添加/更新 ${result.addedOrUpdated} 个账号，跳过 ${result.skipped} 行，正在查询余额...`);
   const target = await readTargetUsageLimitSafe();
   for (const account of added) {
-    await queryAccountBalance(account, { provisionLimit: target });
+    await refreshAccountMeta(account, { provisionLimit: target });
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
   setToolbarStatus(`已添加/更新 ${result.addedOrUpdated} 个账号，余额与上限($${target})已就绪`);
@@ -2183,15 +2402,25 @@ function installToolbar() {
     .devin-settings-section{padding:14px 0;border-top:1px solid #20262f}
     .devin-settings-section:first-of-type{border-top:0;padding-top:4px}
     .devin-settings-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-    .devin-account-row{display:flex;flex-direction:column;gap:6px;margin:6px 0;padding:9px 10px;border-radius:10px;background:#171b23}
-    .devin-account-top{display:flex;gap:8px;align-items:center;justify-content:space-between}
-    .devin-account-identity{min-width:0;display:flex;flex-direction:column;gap:1px}
-    .devin-account-identity strong{overflow:hidden;font-weight:600;color:#e6e9ef;text-overflow:ellipsis;white-space:nowrap}
+    #devin-account-list{display:flex;flex-direction:column;border:1px solid #20262f;border-radius:10px;overflow:hidden;background:#12161d}
+    .devin-account-empty{padding:14px;font-size:12px;color:#7f8896;text-align:center}
+    .devin-account-batchbar{display:flex;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid #20262f;background:#171b23}
+    .devin-batch-selectall{display:flex;gap:6px;align-items:center;margin:0;flex:1;font-size:12px;color:#c1c9d6}
+    .devin-batch-selectall input{width:auto;margin:0}
+    .devin-account-batchbar button{padding:5px 10px;font-size:12px;background:#1e242e}
+    .devin-account-batchbar button:disabled{opacity:.45;cursor:default}
+    .devin-account-row{display:flex;flex-direction:column;gap:5px;padding:9px 10px;border-top:1px solid #191e26}
+    .devin-account-row:first-child{border-top:0}
+    .devin-account-main{display:flex;gap:9px;align-items:center}
+    .devin-account-select{width:auto;margin:0;flex:none}
+    .devin-account-identity{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+    .devin-account-identity strong{overflow:hidden;font-size:13px;font-weight:600;color:#e6e9ef;text-overflow:ellipsis;white-space:nowrap}
     .devin-account-identity span{overflow:hidden;font-size:11px;color:#7f8896;text-overflow:ellipsis;white-space:nowrap}
     .devin-account-balance{flex:none;font-size:12px;color:#aab3c1;white-space:nowrap;font-variant-numeric:tabular-nums}
     .devin-account-balance-negative,.devin-account-balance-error{color:#ff9ba3}
     .devin-account-balance-positive{color:#84dcae}
-    .devin-account-actions{display:flex;flex-wrap:wrap;gap:5px}
+    .devin-account-meta{overflow:hidden;padding-left:26px;font-size:11px;color:#7f8896;text-overflow:ellipsis;white-space:nowrap}
+    .devin-account-actions{display:flex;flex-wrap:wrap;gap:5px;padding-left:26px}
     .devin-account-actions button{padding:4px 9px;font-size:12px;background:#1e242e}
     .devin-account-sessions{margin-top:4px;padding:8px;border-radius:8px;background:#0d1117}
     .devin-session-filter{margin:0 0 7px}
@@ -2206,7 +2435,6 @@ function installToolbar() {
   toolbar.id = "devin-exporter-toolbar";
   toolbar.innerHTML = `
     <button id="devin-export-handoff" type="button">导出 Handoff</button>
-    <button id="devin-manual-switch" type="button">换到下一个号</button>
     <button id="devin-settings-button" type="button">设置</button>
     <span id="devin-exporter-balance">余额 —</span>
     <span id="devin-exporter-phase"></span>
@@ -2232,6 +2460,7 @@ function installToolbar() {
       <div class="devin-settings-actions">
         <button id="devin-apply-limit" type="button">应用上限到当前账号</button>
         <button id="devin-refresh-all-balances" type="button">刷新全部余额</button>
+        <button id="devin-manual-switch" type="button">换到下一个号</button>
       </div>
     </section>
     <section class="devin-settings-section">
@@ -2252,10 +2481,11 @@ function installToolbar() {
   `;
   document.body.appendChild(panel);
   toolbar.querySelector("#devin-export-handoff").addEventListener("click", exportHandoffInPage);
-  toolbar.querySelector("#devin-manual-switch").addEventListener("click", () => {
-    beginAutoSwitch(true).catch((error) => setToolbarStatus(error.message, true));
-  });
   toolbar.querySelector("#devin-settings-button").addEventListener("click", () => {
+    if (!panel.hidden) {
+      panel.hidden = true;
+      return;
+    }
     openSettingsPanel().then(async () => {
       const stored = await storageGet(["continuationTemplate"]);
       panel.querySelector("#devin-template").value = stored.continuationTemplate || DEFAULT_HANDOFF_TEMPLATE;
@@ -2266,7 +2496,10 @@ function installToolbar() {
   });
   panel.querySelector("#devin-apply-limit").addEventListener("click", applyTargetUsageLimit);
   panel.querySelector("#devin-refresh-all-balances").addEventListener("click", () => {
-    refreshAllAccountBalances().catch((error) => setToolbarStatus(error.message, true));
+    refreshAccountsMeta(accountDraft.slice()).catch((error) => setToolbarStatus(error.message, true));
+  });
+  panel.querySelector("#devin-manual-switch").addEventListener("click", () => {
+    beginAutoSwitch(true).catch((error) => setToolbarStatus(error.message, true));
   });
   panel.querySelector("#devin-save-settings").addEventListener("click", saveSettingsPanel);
   panel.querySelector("#devin-reset-template").addEventListener("click", () => {
@@ -2362,6 +2595,8 @@ if (typeof module !== "undefined") {
     normalizeAccountObject,
     mergeBatchAccounts,
     normalizeSessionRecord,
+    pickLatestSession,
+    formatSessionStatus,
     buildVauthPayload,
     buildIsolatedSessionUrl,
     selectNextAccount,
