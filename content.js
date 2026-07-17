@@ -1286,17 +1286,25 @@ function updateToolbar() {
   storageGet(["autoSwitchState"]).then((stored) => toolbarPhase(stored.autoSwitchState)).catch(() => {});
 }
 
-if (typeof document !== "undefined" && location.hostname === "app.devin.ai") {
-  installToolbar();
-  updateToolbar();
+const isAppHost = typeof location !== "undefined" && location.hostname === "app.devin.ai";
+const isAutoSwitchHost = isAppHost
+  || (typeof location !== "undefined" && location.hostname === "devin.ai");
+
+if (typeof document !== "undefined" && isAutoSwitchHost) {
+  if (isAppHost) {
+    installToolbar();
+    updateToolbar();
+    new MutationObserver(() => {
+      installToolbar();
+      updateToolbar();
+    }).observe(document.documentElement, { childList: true, subtree: true });
+  }
   runAutoSwitch().catch((error) => setToolbarStatus(error.message, true));
-  new MutationObserver(() => {
-    installToolbar();
-    updateToolbar();
-  }).observe(document.documentElement, { childList: true, subtree: true });
   setInterval(() => {
-    installToolbar();
-    updateToolbar();
+    if (isAppHost) {
+      installToolbar();
+      updateToolbar();
+    }
     runAutoSwitch().catch((error) => setToolbarStatus(error.message, true));
   }, 1500);
 }
