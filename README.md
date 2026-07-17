@@ -12,16 +12,31 @@ same-origin session and events endpoints using the browser's existing session
 token. It does not embed a Devin API key or service-user token. Only the
 currently opened session is exported.
 
+### Development / build
+
+The extension is a React app built with Vite + `@crxjs/vite-plugin`
+(Manifest V3). Framework-agnostic logic lives in `src/core.js`; the injected
+toolbar/settings panel and the popup are React (`src/content`, `src/popup`).
+The source manifest is `src/manifest.config.js`.
+
+```bash
+npm install       # once
+npm run build     # → dist/  (load this folder unpacked)
+npm test          # node --test against src/core.js
+npm run dev       # HMR dev build
+```
+
 ### Load unpacked in Chrome or Edge
 
-1. Open `chrome://extensions` (or `edge://extensions`).
-2. Enable **Developer mode**.
-3. Click **Load unpacked**.
-4. Select this repository directory.
-5. Open a Devin session, click the extension icon, choose a format, and click
+1. Run `npm install && npm run build` to produce `dist/`.
+2. Open `chrome://extensions` (or `edge://extensions`).
+3. Enable **Developer mode**.
+4. Click **Load unpacked**.
+5. Select the built `dist/` directory.
+6. Open a Devin session, click the extension icon, choose a format, and click
    **Export**.
 
-Firefox can load the extension from `about:debugging` → **This Firefox** →
+Firefox can load the built `dist/` from `about:debugging` → **This Firefox** →
 **Load Temporary Add-on**, subject to Firefox's Manifest V3 compatibility.
 
 ### One-click install for all Chrome profiles (Windows)
@@ -57,7 +72,8 @@ Chrome — no need to re-add it. For a silent command-line update (no Explorer, 
 browser, no prompt), run `install/update-unpacked-silent-windows.cmd`.
 
 **How updates work.** Pushing a commit to `main` with a bumped `version` in
-`manifest.json` triggers `.github/workflows/release-extension.yml`, which packs a
+`package.json` triggers `.github/workflows/release-extension.yml`, which runs
+`npm ci && npm run build`, then packs the built `dist/` into a
 signed CRX (using the `EXTENSION_CRX_KEY` repo secret) and publishes it plus an
 `updates.xml` as a GitHub release `ext-v<version>`. The installed policy points at
 `releases/latest/download/updates.xml`, so every machine picks up the new version
@@ -217,7 +233,7 @@ Chrome 企业策略（自托管、强制安装）把插件装到**本机所有 C
 `install/update-unpacked-windows.cmd` 再重启 Chrome，无需重新添加。若想要纯命令行静默更新
 （不开文件夹、不开浏览器、不弹窗），运行 `install/update-unpacked-silent-windows.cmd`。
 
-**更新机制**：向 `main` 推送并把 `manifest.json` 里的 `version` 提升，会触发
+**更新机制**：向 `main` 推送并把 `package.json` 里的 `version` 提升，会触发
 `.github/workflows/release-extension.yml`，用仓库密钥 `EXTENSION_CRX_KEY` 打包
 签名 CRX，并把它和 `updates.xml` 一起发布为 Release `ext-v<version>`。已安装的
 策略指向 `releases/latest/download/updates.xml`，所有机器后台自动升级。**每次功能

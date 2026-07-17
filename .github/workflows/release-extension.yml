@@ -18,9 +18,9 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Read manifest version
+      - name: Read package version
         id: v
-        run: echo "version=$(node -p "require('./manifest.json').version")" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
       - name: Check if release already exists
         id: check
@@ -33,6 +33,13 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Install and build
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          npm ci
+          npm test
+          npm run build
+
       - name: Pack CRX
         if: steps.check.outputs.exists == 'false'
         env:
@@ -43,25 +50,14 @@ jobs:
             exit 1
           fi
           printf '%s' "$CRX_KEY" > key.pem
-          mkdir -p build/src
-          rsync -a \
-            --exclude '.git' \
-            --exclude '.github' \
-            --exclude 'install' \
-            --exclude 'build' \
-            --exclude 'node_modules' \
-            --exclude 'key.pem' \
-            --exclude '*.crx' \
-            --exclude 'updates.xml' \
-            ./ build/src/
-          npx --yes crx3@1.1.3 build/src \
+          npx --yes crx3@1.1.3 dist \
             -p key.pem \
             -o devin-session-exporter.crx \
             -x updates.xml \
             --appVersion "${{ steps.v.outputs.version }}" \
             --crxURL "https://github.com/${{ github.repository }}/releases/latest/download/devin-session-exporter.crx"
           rm -f key.pem
-          ( cd build/src && zip -r ../../devin-session-exporter.zip . )
+          ( cd dist && zip -r ../devin-session-exporter.zip . )
 
       - name: Create release
         if: steps.check.outputs.exists == 'false'
