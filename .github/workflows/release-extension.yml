@@ -1,0 +1,73 @@
+name: Release extension CRX
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Read manifest version
+        id: v
+        run: echo "version=$(node -p "require('./manifest.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Check if release already exists
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "ext-v${{ steps.v.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Pack CRX
+        if: steps.check.outputs.exists == 'false'
+        env:
+          CRX_KEY: ${{ secrets.EXTENSION_CRX_KEY }}
+        run: |
+          if [ -z "$CRX_KEY" ]; then
+            echo "::error::EXTENSION_CRX_KEY secret is not set."
+            exit 1
+          fi
+          printf '%s' "$CRX_KEY" > key.pem
+          mkdir -p build/src
+          rsync -a \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude 'install' \
+            --exclude 'build' \
+            --exclude 'node_modules' \
+            --exclude 'key.pem' \
+            --exclude '*.crx' \
+            --exclude 'updates.xml' \
+            ./ build/src/
+          npx --yes crx3@1.1.3 build/src \
+            -p key.pem \
+            -o devin-session-exporter.crx \
+            -x updates.xml \
+            --appVersion "${{ steps.v.outputs.version }}" \
+            --crxURL "https://github.com/${{ github.repository }}/releases/latest/download/devin-session-exporter.crx"
+          rm -f key.pem
+
+      - name: Create release
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "ext-v${{ steps.v.outputs.version }}" \
+            devin-session-exporter.crx updates.xml \
+            --title "Extension v${{ steps.v.outputs.version }}" \
+            --notes "Auto-built CRX for one-click Chrome policy install/update."
