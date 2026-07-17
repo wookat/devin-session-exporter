@@ -740,13 +740,17 @@ function isQuotaExceeded() {
   return /usage quota exceeded|usage quota has been exceeded|out of on-demand usage|ran out of free credits/i.test(text);
 }
 
-function clickButtonContaining(text) {
-  const target = [...document.querySelectorAll("button")].find((button) => {
+function findButtonContaining(text) {
+  return [...document.querySelectorAll("button")].find((button) => {
     const style = getComputedStyle(button);
     return style.display !== "none"
       && style.visibility !== "hidden"
       && (button.innerText || button.textContent || "").trim().toLowerCase().includes(text.toLowerCase());
   });
+}
+
+function clickButtonContaining(text) {
+  const target = findButtonContaining(text);
   if (!target) return false;
   target.click();
   return true;
@@ -869,6 +873,7 @@ async function driveLogout(state) {
     phase: "loggingIn",
     loginStep: "email",
     lastActionAt: Date.now(),
+    stepStartedAt: Date.now(),
     attempts: (state.attempts || 0) + 1
   });
   setToolbarStatus("正在切换账号...");
@@ -888,43 +893,99 @@ async function driveLogin(state) {
     await abortAutoSwitch("目标账号资料不完整，自动换号已停止");
     return;
   }
-  if (state.attempts > 3) {
-    await abortAutoSwitch("登录重试次数过多，自动换号已停止");
-    return;
-  }
   if (loginErrorVisible()) {
     await abortAutoSwitch("登录失败，请检查账号密码");
     return;
   }
+  const stepStartedAt = state.stepStartedAt || state.lastActionAt || Date.now();
+  if (Date.now() - stepStartedAt > 15000) {
+    await abortAutoSwitch("登录表单等待超时，自动换号已停止");
+    return;
+  }
   if (state.loginStep === "email") {
-    const emailInput = await waitForElement(() => document.querySelector("input[type='email']"));
+    const loginPair = await waitForElement(() => {
+      const input = document.querySelector("input[type='email']");
+      const button = findButtonContaining("log in");
+      return input && button ? { input, button } : null;
+    }, 900, 150);
+    const emailInput = loginPair?.input || document.querySelector("input[type='email']");
     if (!emailInput) {
-      await abortAutoSwitch("找不到邮箱输入框，自动换号已停止");
+      setToolbarStatus("等待邮箱登录表单...");
       return;
     }
     setNativeValue(emailInput, account.email);
-    const submitted = clickButtonContaining("log in") || emailInput.form?.requestSubmit?.();
+    const loginButton = await waitForElement(() => {
+      const button = findButtonContaining("log in");
+      return button && !button.disabled ? button : null;
+    }, 900, 150);
+    let submitted = false;
+    if (loginButton) {
+      loginButton.click();
+      submitted = true;
+    } else {
+      if (findButtonContaining("log in")) {
+        setToolbarStatus("等待登录按钮启用...");
+      } else {
+        try {
+          const requestSubmit = emailInput.form?.requestSubmit;
+          if (typeof requestSubmit === "function") {
+            requestSubmit.call(emailInput.form);
+            submitted = true;
+          }
+        } catch {
+          submitted = false;
+        }
+      }
+    }
     if (!submitted) {
-      await abortAutoSwitch("找不到登录按钮，自动换号已停止");
+      setToolbarStatus("等待登录按钮...");
       return;
     }
     await saveAutoSwitchState({
       ...state,
       loginStep: "password",
-      lastActionAt: Date.now()
+      lastActionAt: Date.now(),
+      stepStartedAt: Date.now()
     });
     return;
   }
   if (state.loginStep === "password") {
-    const passwordInput = await waitForElement(() => document.querySelector("input[type='password']"), 10000);
+    const loginPair = await waitForElement(() => {
+      const input = document.querySelector("input[type='password']");
+      const button = findButtonContaining("sign in");
+      return input && button ? { input, button } : null;
+    }, 900, 150);
+    const passwordInput = loginPair?.input || document.querySelector("input[type='password']");
     if (!passwordInput) {
-      await abortAutoSwitch("密码输入框未出现，自动换号已停止");
+      setToolbarStatus("等待密码登录表单...");
       return;
     }
     setNativeValue(passwordInput, account.password);
-    const submitted = clickButtonContaining("sign in") || passwordInput.form?.requestSubmit?.();
+    const signInButton = await waitForElement(() => {
+      const button = findButtonContaining("sign in");
+      return button && !button.disabled ? button : null;
+    }, 900, 150);
+    let submitted = false;
+    if (signInButton) {
+      signInButton.click();
+      submitted = true;
+    } else {
+      if (findButtonContaining("sign in")) {
+        setToolbarStatus("等待 Sign in 按钮启用...");
+      } else {
+        try {
+          const requestSubmit = passwordInput.form?.requestSubmit;
+          if (typeof requestSubmit === "function") {
+            requestSubmit.call(passwordInput.form);
+            submitted = true;
+          }
+        } catch {
+          submitted = false;
+        }
+      }
+    }
     if (!submitted) {
-      await abortAutoSwitch("找不到 Sign in 按钮，自动换号已停止");
+      setToolbarStatus("等待 Sign in 按钮...");
       return;
     }
     await saveAutoSwitchState({
