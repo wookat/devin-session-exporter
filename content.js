@@ -263,6 +263,72 @@ function apiHeaders(token, orgId) {
   };
 }
 
+async function resolveBillingOrg() {
+  const authSession = readAuthSession();
+  const orgIds = collectOrgIds(authSession);
+  for (const orgId of orgIds) {
+    try {
+      const response = await fetch(`/api/${orgId}/billing/status`, {
+        headers: apiHeaders(authSession.token, orgId)
+      });
+      if (response.ok) {
+        return { orgId, token: authSession.token };
+      }
+    } catch {
+      // Try the next known organization.
+    }
+  }
+  throw new Error("找不到可访问的 Devin 计费组织");
+}
+
+async function fetchBillingInfo() {
+  const context = await resolveBillingOrg();
+  const headers = apiHeaders(context.token, context.orgId);
+  const [statusResponse, limitsResponse] = await Promise.all([
+    fetch(`/api/${context.orgId}/billing/status`, { headers }),
+    fetch(`/api/${context.orgId}/billing/usage/limits`, { headers })
+  ]);
+  if (!statusResponse.ok || !limitsResponse.ok) {
+    throw new Error("读取 Devin 计费信息失败");
+  }
+  const status = await statusResponse.json();
+  const limits = await limitsResponse.json();
+  return {
+    orgId: context.orgId,
+    availableCredits: status?.available_credits ?? null,
+    overageCredits: status?.overage_credits ?? null,
+    billingError: status?.billing_error ?? null,
+    maxAcuLimit: limits?.max_acu_limit ?? null
+  };
+}
+
+function buildUsageLimitBody(dollars) {
+  return { max_credits: dollars };
+}
+
+async function setUsageLimit(dollars, context) {
+  const value = Number(dollars);
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error("消息用量上限必须是非负数字");
+  }
+  const billingContext = context || await resolveBillingOrg();
+  const response = await fetch(
+    `/api/${billingContext.orgId}/billing/usage/limits`,
+    {
+      method: "POST",
+      headers: {
+        ...apiHeaders(billingContext.token, billingContext.orgId),
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(buildUsageLimitBody(value))
+    }
+  );
+  if (!response.ok) {
+    throw new Error(`更新 Devin 消息用量上限失败（HTTP ${response.status}）`);
+  }
+  return response;
+}
+
 async function fetchSessionData(devinId, token, orgIds) {
   for (const orgId of orgIds) {
     const response = await fetch(`/api/sessions/${encodeURIComponent(devinId)}`, {
@@ -568,6 +634,7 @@ function routeAutoSwitch(currentUrl, state = {}, signals = {}) {
 }
 
 const extensionApi = globalThis.browser ?? globalThis.chrome;
+const DEFAULT_TARGET_USAGE_LIMIT = 200;
 const AUTO_SWITCH_KEYS = [
   "managedAccounts",
   "accountVault",
@@ -577,7 +644,8 @@ const AUTO_SWITCH_KEYS = [
   "autoSwitchState",
   "lastHandoff",
   "lastUsedAccountEmail",
-  "continuationTemplate"
+  "continuationTemplate",
+  "targetUsageLimit"
 ];
 
 function storageGet(keys = AUTO_SWITCH_KEYS) {
@@ -847,6 +915,14 @@ function loginErrorVisible() {
     .test(document.body?.innerText || "");
 }
 
+function formatBalanceDisplay(info = {}) {
+  const overage = Number(info.overageCredits);
+  const limit = Number(info.maxAcuLimit);
+  const balanceText = Number.isFinite(overage) ? `$${overage.toFixed(2)}` : "—";
+  const limitText = Number.isFinite(limit) ? `$${limit}` : "—";
+  return `余额 ${balanceText} · 上限 ${limitText}`;
+}
+
 async function abortAutoSwitch(message) {
   await saveAutoSwitchState({
     phase: "failed",
@@ -1010,7 +1086,21 @@ async function createContinuationSession(state) {
     setTimeout(() => createContinuationSession(state).catch((error) => setToolbarStatus(error.message, true)), 800);
     return;
   }
-  const stored = await storageGet(["continuationTemplate", "lastHandoff", "autoSendContinuation"]);
+  const stored = await storageGet([
+    "continuationTemplate",
+    "lastHandoff",
+    "autoSendContinuation",
+    "targetUsageLimit"
+  ]);
+  const targetUsageLimit = Number.isFinite(Number(stored.targetUsageLimit))
+    ? Number(stored.targetUsageLimit)
+    : DEFAULT_TARGET_USAGE_LIMIT;
+  try {
+    await setUsageLimit(targetUsageLimit);
+    await refreshBalanceDisplay();
+  } catch (error) {
+    setToolbarStatus(`当前账号消息上限设置失败，继续续接：${error.message}`, true);
+  }
   const text = buildContinuationText(
     stored.continuationTemplate || DEFAULT_HANDOFF_TEMPLATE,
     stored.lastHandoff?.text || ""
@@ -1179,10 +1269,18 @@ async function openSettingsPanel() {
   if (!panel) return;
   try {
     accountDraft = await loadManagedAccounts();
-    const values = await storageGet(["accountEncryptionEnabled", "autoSwitchEnabled", "autoSendContinuation"]);
+    const values = await storageGet([
+      "accountEncryptionEnabled",
+      "autoSwitchEnabled",
+      "autoSendContinuation",
+      "targetUsageLimit"
+    ]);
     panel.querySelector("#devin-encrypt-accounts").checked = values.accountEncryptionEnabled === true;
     panel.querySelector("#devin-auto-switch").checked = values.autoSwitchEnabled === true;
     panel.querySelector("#devin-auto-send").checked = values.autoSendContinuation !== false;
+    panel.querySelector("#devin-target-limit").value = Number.isFinite(Number(values.targetUsageLimit))
+      ? Number(values.targetUsageLimit)
+      : DEFAULT_TARGET_USAGE_LIMIT;
     renderAccountRows();
     panel.hidden = false;
   } catch (error) {
@@ -1215,10 +1313,12 @@ async function saveSettingsPanel() {
     renderAccountRows();
   }
   const encrypted = panel.querySelector("#devin-encrypt-accounts").checked;
+  const targetUsageLimit = readTargetUsageLimit(panel);
   await saveManagedAccounts(accountDraft, encrypted);
   await storageSet({
     autoSwitchEnabled: panel.querySelector("#devin-auto-switch").checked,
-    autoSendContinuation: panel.querySelector("#devin-auto-send").checked
+    autoSendContinuation: panel.querySelector("#devin-auto-send").checked,
+    targetUsageLimit
   });
   panel.hidden = true;
   setToolbarStatus("账号设置已保存");
@@ -1246,6 +1346,28 @@ function addAccountFromPanel() {
   password.value = "";
   renderAccountRows();
   setToolbarStatus("账号已加入列表，请保存设置");
+}
+
+function readTargetUsageLimit(panel) {
+  const value = Number(panel.querySelector("#devin-target-limit").value);
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error("消息用量上限必须是非负数字");
+  }
+  return value;
+}
+
+async function applyTargetUsageLimit() {
+  const panel = document.getElementById("devin-exporter-settings");
+  if (!panel) return;
+  try {
+    const target = readTargetUsageLimit(panel);
+    await setUsageLimit(target);
+    await storageSet({ targetUsageLimit: target });
+    await refreshBalanceDisplay();
+    setToolbarStatus(`当前账号消息上限已设为 $${target.toFixed(2)}`);
+  } catch (error) {
+    setToolbarStatus(error.message || "更新消息用量上限失败", true);
+  }
 }
 
 async function exportHandoffInPage() {
@@ -1291,6 +1413,7 @@ function installToolbar() {
     <button id="devin-export-handoff" type="button">导出 Handoff</button>
     <button id="devin-manual-switch" type="button">换到下一个号</button>
     <button id="devin-settings-button" type="button">设置</button>
+    <span id="devin-exporter-balance">余额 —</span>
     <span id="devin-exporter-phase">状态：idle</span>
     <span id="devin-exporter-status" role="status"></span>
   `;
@@ -1309,6 +1432,8 @@ function installToolbar() {
     <label><input id="devin-encrypt-accounts" type="checkbox"> 使用主密码加密账号列表</label>
     <label><input id="devin-auto-switch" type="checkbox"> 启用自动换号</label>
     <label><input id="devin-auto-send" type="checkbox" checked> 自动发送续接</label>
+    <input id="devin-target-limit" type="number" min="0" step="0.01" placeholder="每个账号消息用量上限（美元）">
+    <button id="devin-apply-limit" type="button">将当前账号上限设为目标值</button>
     <hr>
     <strong>续接模板</strong>
     <textarea id="devin-template" placeholder="续接模板"></textarea>
@@ -1330,6 +1455,7 @@ function installToolbar() {
     }).catch((error) => setToolbarStatus(error.message, true));
   });
   panel.querySelector("#devin-account-add").addEventListener("click", addAccountFromPanel);
+  panel.querySelector("#devin-apply-limit").addEventListener("click", applyTargetUsageLimit);
   panel.querySelector("#devin-save-settings").addEventListener("click", saveSettingsPanel);
   panel.querySelector("#devin-reset-template").addEventListener("click", () => {
     panel.querySelector("#devin-template").value = DEFAULT_HANDOFF_TEMPLATE;
@@ -1341,12 +1467,24 @@ function installToolbar() {
   templateSave.addEventListener("click", async () => {
     await storageSet({ continuationTemplate: panel.querySelector("#devin-template").value });
   });
+  refreshBalanceDisplay();
 }
 
 function updateToolbar() {
   const exportButton = document.getElementById("devin-export-handoff");
   if (exportButton) exportButton.disabled = !isSessionPage();
   storageGet(["autoSwitchState"]).then((stored) => toolbarPhase(stored.autoSwitchState)).catch(() => {});
+}
+
+async function refreshBalanceDisplay() {
+  const element = document.getElementById("devin-exporter-balance");
+  if (!element) return;
+  try {
+    const info = await fetchBillingInfo();
+    element.textContent = formatBalanceDisplay(info);
+  } catch {
+    element.textContent = "余额 —";
+  }
 }
 
 const isAppHost = typeof location !== "undefined" && location.hostname === "app.devin.ai";
@@ -1357,6 +1495,7 @@ if (typeof document !== "undefined" && isAutoSwitchHost) {
   if (isAppHost) {
     installToolbar();
     updateToolbar();
+    setInterval(() => refreshBalanceDisplay(), 60000);
     new MutationObserver(() => {
       installToolbar();
       updateToolbar();
@@ -1395,6 +1534,8 @@ if (typeof module !== "undefined") {
     buildHandoff,
     buildContinuationText,
     applyHandoff,
+    buildUsageLimitBody,
+    formatBalanceDisplay,
     selectNextAccount,
     routeAutoSwitch
   };
