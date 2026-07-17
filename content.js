@@ -1036,14 +1036,16 @@ async function createContinuationSession(state) {
   setToolbarStatus(shouldSend ? "已发送续接提示" : "已填入续接提示");
 }
 
-async function exportHandoffForSwitch() {
+async function exportHandoffForSwitch(options = {}) {
   const data = await extractConversation({
     includeConversation: true,
     includeWorklog: true,
     includeChanges: true,
     includeThoughts: false
   });
-  const handoff = buildHandoff(data);
+  const handoff = buildHandoff(data, {
+    includeFullConversation: options.includeFullConversation === true
+  });
   await storageSet({
     lastHandoff: {
       text: handoff,
@@ -1253,7 +1255,7 @@ async function exportHandoffInPage() {
   }
   try {
     setToolbarStatus("正在导出 Handoff...");
-    const data = await exportHandoffForSwitch();
+    const data = await exportHandoffForSwitch({ includeFullConversation: true });
     const text = (await storageGet(["lastHandoff"])).lastHandoff.text;
     const link = document.createElement("a");
     link.href = `data:text/markdown;charset=utf-8,${encodeURIComponent(text)}`;
