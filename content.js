@@ -1991,6 +1991,13 @@ function openIsolatedSession(session, auth) {
   }
 }
 
+async function openLatestSession(account, session) {
+  setToolbarStatus(`正在打开：${session.title}…`);
+  const auth = await resolveAccountAuth(account.email, account.password);
+  openIsolatedSession(session, auth);
+  setToolbarStatus(`已打开：${session.title}`);
+}
+
 async function exportSessionFromList(session, auth, button) {
   setButtonLoading(button, true);
   try {
@@ -2173,7 +2180,25 @@ function renderAccountRows() {
 
     const meta = document.createElement("div");
     meta.className = "devin-account-meta";
-    meta.textContent = formatLatestSession(accountLatestCache.get(key));
+    const latest = accountLatestCache.get(key);
+    if (latest && latest.session && latest.session.sessionId) {
+      const label = document.createElement("span");
+      label.textContent = "最新会话：";
+      const link = document.createElement("a");
+      link.href = "#";
+      link.className = "devin-account-latest-link";
+      link.title = "点击打开该会话（不换号）";
+      link.textContent = latest.session.title
+        ? `${latest.session.title} · ${formatSessionStatus(latest.session.status)}`
+        : formatSessionStatus(latest.session.status);
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        openLatestSession(account, latest.session).catch((error) => setToolbarStatus(error.message, true));
+      });
+      meta.append(label, link);
+    } else {
+      meta.textContent = formatLatestSession(latest);
+    }
 
     const actions = document.createElement("div");
     actions.className = "devin-account-actions";
@@ -2394,8 +2419,9 @@ function installToolbar() {
     #devin-exporter-settings h2{margin:0 0 2px;font-size:16px;font-weight:600;color:#f2f4f8}
     #devin-exporter-settings h3{margin:0 0 8px;font-size:12px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:#8a93a3}
     #devin-exporter-settings p{margin:6px 0 10px;font-size:12px;color:#7f8896;line-height:1.5}
-    #devin-exporter-settings input,#devin-exporter-settings textarea{box-sizing:border-box;width:100%;margin:4px 0;padding:8px 10px;border:1px solid #2a303b;border-radius:8px;background:#0d1117;color:#e6e9ef;outline:none}
-    #devin-exporter-settings input:focus,#devin-exporter-settings textarea:focus{border-color:#2f6bff}
+    #devin-exporter-settings input[type="number"],#devin-exporter-settings input[type="search"],#devin-exporter-settings input[type="text"],#devin-exporter-settings input[type="password"],#devin-exporter-settings textarea{box-sizing:border-box;width:100%;margin:4px 0;padding:8px 10px;border:1px solid #2a303b;border-radius:8px;background:#0d1117;color:#e6e9ef;outline:none}
+    #devin-exporter-settings input[type="checkbox"]{width:16px;height:16px;margin:0;flex:none;accent-color:#2f6bff}
+    #devin-exporter-settings input[type="number"]:focus,#devin-exporter-settings input[type="search"]:focus,#devin-exporter-settings textarea:focus{border-color:#2f6bff}
     #devin-exporter-settings textarea{height:130px;resize:vertical}
     #devin-exporter-settings label{display:flex;gap:8px;align-items:center;margin:8px 0;font-size:13px;color:#c1c9d6}
     #devin-exporter-settings label input{width:auto;margin:0}
@@ -2420,6 +2446,8 @@ function installToolbar() {
     .devin-account-balance-negative,.devin-account-balance-error{color:#ff9ba3}
     .devin-account-balance-positive{color:#84dcae}
     .devin-account-meta{overflow:hidden;padding-left:26px;font-size:11px;color:#7f8896;text-overflow:ellipsis;white-space:nowrap}
+    .devin-account-latest-link{color:#8ab4ff;cursor:pointer;text-decoration:none}
+    .devin-account-latest-link:hover{text-decoration:underline}
     .devin-account-actions{display:flex;flex-wrap:wrap;gap:5px;padding-left:26px}
     .devin-account-actions button{padding:4px 9px;font-size:12px;background:#1e242e}
     .devin-account-sessions{margin-top:4px;padding:8px;border-radius:8px;background:#0d1117}
