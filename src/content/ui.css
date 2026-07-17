@@ -1,0 +1,91 @@
+#devin-exporter-toolbar,#devin-exporter-settings{position:fixed;z-index:2147483647;font:13px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#e6e9ef;color-scheme:dark}
+@keyframes devin-spin{to{transform:rotate(360deg)}}
+#devin-exporter-toolbar{right:16px;bottom:16px;display:flex;gap:6px;align-items:center;max-width:calc(100vw - 32px);padding:6px;border:1px solid #262b34;border-radius:12px;background:#12161dF2}
+#devin-exporter-toolbar button,#devin-exporter-settings button{border:0;border-radius:8px;background:#222835;color:#e6e9ef;padding:7px 11px;cursor:pointer;transition:background .12s}
+#devin-exporter-toolbar button:hover,#devin-exporter-settings button:hover{background:#2d3542}
+#devin-exporter-toolbar #devin-export-handoff{background:#2f6bff;color:#fff;font-weight:600}
+#devin-exporter-toolbar #devin-export-handoff:hover{background:#4179ff}
+#devin-exporter-toolbar button:disabled{cursor:default;opacity:.55}
+#devin-exporter-toolbar button.is-loading::after,#devin-exporter-settings button.is-loading::after{content:"";display:inline-block;width:12px;height:12px;margin-left:8px;border:2px solid #ffffff66;border-top-color:#fff;border-radius:50%;vertical-align:-2px;animation:devin-spin .7s linear infinite}
+#devin-exporter-balance{padding:5px 9px;border-radius:8px;background:#1a1f28;color:#aab3c1;white-space:nowrap;font-variant-numeric:tabular-nums}
+#devin-exporter-balance.balance-negative{background:#2c1c20;color:#ff9ba3}
+#devin-exporter-balance.balance-positive{background:#16241d;color:#84dcae}
+#devin-exporter-status{max-width:220px;overflow:hidden;color:#9aa4b2;text-overflow:ellipsis;white-space:nowrap}
+#devin-exporter-status[data-error=true]{color:#ff9ba3}
+#devin-exporter-settings{right:16px;bottom:66px;width:min(440px,calc(100vw - 32px));max-height:82vh;overflow:auto;padding:12px 14px;border:1px solid #262b34;border-radius:14px;background:#12161dFA}
+#devin-exporter-settings h2{margin:0;font-size:15px;font-weight:600;color:#f2f4f8}
+#devin-exporter-settings h3{margin:0 0 6px;font-size:11px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:#8a93a3}
+#devin-exporter-settings p{margin:6px 0 10px;font-size:12px;color:#7f8896;line-height:1.5}
+.devin-settings-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.devin-close-x{padding:2px 9px!important;font-size:16px;line-height:1;background:transparent!important;color:#8a93a3}
+.devin-close-x:hover{color:#e6e9ef}
+.devin-icon-btn{padding:2px 8px!important;font-size:13px;background:#1e242e}
+.devin-current{padding:10px 12px;margin-bottom:12px;border:1px solid #20262f;border-radius:10px;background:#171b23}
+.devin-current-line{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.devin-current-email{overflow:hidden;font-size:13px;font-weight:600;color:#e6e9ef;text-overflow:ellipsis;white-space:nowrap}
+.devin-current-meta{margin-top:2px;font-size:12px;color:#aab3c1;font-variant-numeric:tabular-nums}
+.devin-current-meta.balance-negative{color:#ff9ba3}
+.devin-current-meta.balance-positive{color:#84dcae}
+.devin-current-actions{margin-top:8px}
+.devin-current-actions button{padding:5px 11px;font-size:12px;background:#1e242e}
+.devin-field-row{display:flex;gap:8px}
+.devin-field{flex:1;display:flex;flex-direction:column;align-items:stretch;gap:3px;margin:0;font-size:11px;color:#8a93a3}
+.devin-field input{margin:0!important}
+.devin-toggle-row{display:flex;flex-wrap:wrap;gap:6px 16px;margin:10px 0 2px}
+.devin-toggle-row label{margin:0!important;font-size:12px}
+.devin-details{margin-top:10px}
+.devin-details summary{cursor:pointer;font-size:12px;color:#8a93a3;list-style:none}
+.devin-details summary:hover{color:#c1c9d6}
+.devin-details textarea{height:110px}
+#devin-exporter-settings button.devin-primary{background:#2f6bff;color:#fff;font-weight:600}
+#devin-exporter-settings button.devin-primary:hover{background:#4179ff}
+#devin-exporter-settings input[type="number"],#devin-exporter-settings input[type="search"],#devin-exporter-settings input[type="text"],#devin-exporter-settings input[type="password"],#devin-exporter-settings textarea{box-sizing:border-box;width:100%;margin:4px 0;padding:8px 10px;border:1px solid #2a303b;border-radius:8px;background:#0d1117;color:#e6e9ef;outline:none}
+#devin-exporter-settings input[type="checkbox"]{width:16px;height:16px;margin:0;flex:none;accent-color:#2f6bff}
+#devin-exporter-settings input[type="number"]:focus,#devin-exporter-settings input[type="search"]:focus,#devin-exporter-settings textarea:focus{border-color:#2f6bff}
+#devin-exporter-settings textarea{height:130px;resize:vertical}
+#devin-exporter-settings label{display:flex;gap:8px;align-items:center;margin:8px 0;font-size:13px;color:#c1c9d6}
+#devin-exporter-settings label input{width:auto;margin:0}
+.devin-settings-section{padding:12px 0;border-top:1px solid #20262f}
+.devin-settings-section:first-of-type{border-top:0}
+.devin-settings-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+#devin-exporter-settings textarea#devin-batch-accounts{height:64px}
+#devin-account-list{display:flex;flex-direction:column;border:1px solid #20262f;border-radius:10px;overflow:hidden;background:#12161d}
+.devin-account-empty{padding:14px;font-size:12px;color:#7f8896;text-align:center}
+.devin-account-batchbar{display:flex;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid #20262f;background:#171b23}
+.devin-batch-selectall{display:flex;gap:6px;align-items:center;margin:0;flex:1;font-size:12px;color:#c1c9d6}
+.devin-batch-selectall input{width:auto;margin:0}
+.devin-account-batchbar button{padding:5px 10px;font-size:12px;background:#1e242e}
+.devin-account-batchbar button:disabled{opacity:.45;cursor:default}
+.devin-account-row{display:flex;flex-direction:column;gap:5px;padding:9px 10px;border-top:1px solid #191e26}
+.devin-account-row:first-child{border-top:0}
+.devin-account-main{display:flex;gap:9px;align-items:center}
+.devin-account-select{width:auto;margin:0;flex:none}
+.devin-account-identity{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.devin-account-identity strong{overflow:hidden;font-size:13px;font-weight:600;color:#e6e9ef;text-overflow:ellipsis;white-space:nowrap}
+.devin-account-identity span{overflow:hidden;font-size:11px;color:#7f8896;text-overflow:ellipsis;white-space:nowrap}
+.devin-account-balance{flex:none;font-size:12px;color:#aab3c1;white-space:nowrap;font-variant-numeric:tabular-nums}
+.devin-account-balance-negative,.devin-account-balance-error{color:#ff9ba3}
+.devin-account-balance-positive{color:#84dcae}
+.devin-account-meta{display:flex;align-items:center;gap:4px;padding-left:26px;font-size:11px;color:#7f8896;white-space:nowrap}
+.devin-account-meta-label{flex:none}
+.devin-account-latest-link{flex:0 1 auto;min-width:0;overflow:hidden;color:#8ab4ff;cursor:pointer;text-decoration:none;text-overflow:ellipsis;white-space:nowrap}
+.devin-account-latest-link:hover{text-decoration:underline}
+.devin-account-status{flex:none;color:#aab3c1}
+.devin-account-actions{display:flex;flex-wrap:wrap;gap:5px;padding-left:26px}
+.devin-account-actions button{padding:4px 9px;font-size:12px;background:#1e242e}
+.devin-account-actions button.devin-account-switch{background:#264b8a;color:#dce7ff;font-weight:600}
+.devin-account-sessions{margin-top:4px;padding:8px;border-radius:8px;background:#0d1117}
+.devin-session-filter{margin:0 0 7px}
+.devin-session-list{display:flex;flex-direction:column;gap:4px;max-height:230px;overflow:auto}
+.devin-session-row{display:flex;gap:6px;align-items:center;padding:4px 2px}
+.devin-session-title{flex:1;min-width:0;overflow:hidden;font-size:12px;color:#c1c9d6;text-overflow:ellipsis;white-space:nowrap}
+.devin-session-row button{padding:3px 8px;font-size:11px;white-space:nowrap;background:#1e242e}
+.devin-session-empty{padding:4px 2px;font-size:12px;color:#7f8896}
+.devin-update-notice{margin-bottom:10px;padding:8px 10px;font-size:12px;color:#ffd479;border:1px solid #4a3d1e;border-radius:8px;background:#26200f}
+.devin-account-archived{opacity:.6}
+.devin-account-badge{flex:none;align-self:flex-start;padding:0 6px;font-size:10px;color:#c1c9d6;border:1px solid #333b47;border-radius:8px;background:#1e242e}
+.devin-snippet-row{display:flex;gap:6px;align-items:center;padding:5px 0;border-top:1px solid #191e26}
+.devin-snippet-row:first-child{border-top:0}
+.devin-snippet-title{flex:1;min-width:0;overflow:hidden;font-size:12px;color:#c1c9d6;text-overflow:ellipsis;white-space:nowrap}
+.devin-snippet-row button{padding:4px 9px;font-size:12px;background:#1e242e}
+#devin-snippet-text{height:64px}
