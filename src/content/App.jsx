@@ -212,31 +212,72 @@ function AccountRow({ account, index, total, onEdit }) {
         >
           切到此号
         </button>
-        <button type="button" onClick={() => core.refreshAccountMeta(account).catch(reportError)}>
-          刷新
-        </button>
-        <button type="button" onClick={() => core.toggleAccountSessions(account).catch(reportError)}>
-          {sessionsState?.expanded ? "收起会话" : "会话"}
+        <button
+          type="button"
+          className="devin-account-action-icon"
+          title="刷新账号信息"
+          aria-label="刷新账号信息"
+          onClick={() => core.refreshAccountMeta(account).catch(reportError)}
+        >
+          ↻
         </button>
         <button
           type="button"
+          className="devin-account-action-icon"
+          title={sessionsState?.expanded ? "收起会话" : "查看会话"}
+          aria-label={sessionsState?.expanded ? "收起会话" : "查看会话"}
+          onClick={() => core.toggleAccountSessions(account).catch(reportError)}
+        >
+          ▤
+        </button>
+        <button
+          type="button"
+          className="devin-account-action-icon"
+          title="编辑账号"
+          aria-label="编辑账号"
           onClick={() => {
             onEdit(core.accountEditText(account));
             core.setToolbarStatus("已填入文本框，修改后点「添加账号」按相同邮箱更新");
           }}
         >
-          编辑
+          ✎
         </button>
-        <button type="button" onClick={() => core.toggleAccountArchive(index).catch(reportError)}>
-          {account.archived ? "取消归档" : "归档"}
+        <button
+          type="button"
+          className="devin-account-action-icon"
+          title={account.archived ? "取消归档" : "归档账号"}
+          aria-label={account.archived ? "取消归档" : "归档账号"}
+          onClick={() => core.toggleAccountArchive(index).catch(reportError)}
+        >
+          ▣
         </button>
-        <button type="button" onClick={() => core.deleteAccount(key).catch(reportError)}>
-          删除
+        <button
+          type="button"
+          className="devin-account-action-icon"
+          title="删除账号"
+          aria-label="删除账号"
+          onClick={() => core.deleteAccount(key).catch(reportError)}
+        >
+          🗑
         </button>
-        <button type="button" disabled={index === 0} onClick={() => core.moveAccount(index, -1)}>
+        <button
+          type="button"
+          className="devin-account-action-icon"
+          title="上移账号"
+          aria-label="上移账号"
+          disabled={index === 0}
+          onClick={() => core.moveAccount(index, -1)}
+        >
           ↑
         </button>
-        <button type="button" disabled={index === total - 1} onClick={() => core.moveAccount(index, 1)}>
+        <button
+          type="button"
+          className="devin-account-action-icon"
+          title="下移账号"
+          aria-label="下移账号"
+          disabled={index === total - 1}
+          onClick={() => core.moveAccount(index, 1)}
+        >
           ↓
         </button>
       </div>

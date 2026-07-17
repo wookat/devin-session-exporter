@@ -89,3 +89,66 @@
 .devin-snippet-title{flex:1;min-width:0;overflow:hidden;font-size:12px;color:#c1c9d6;text-overflow:ellipsis;white-space:nowrap}
 .devin-snippet-row button{padding:4px 9px;font-size:12px;background:#1e242e}
 #devin-snippet-text{height:64px}
+
+#devin-exporter-toolbar,#devin-exporter-settings{font-size:12px}
+#devin-exporter-toolbar{right:12px;bottom:12px;gap:4px;padding:4px;border-radius:7px}
+#devin-exporter-toolbar button,#devin-exporter-settings button{border:1px solid #2a303b;border-radius:4px;padding:5px 8px;font-size:12px;line-height:1.2}
+#devin-exporter-toolbar button:hover,#devin-exporter-settings button:hover{background:#252c37}
+#devin-exporter-toolbar button.is-loading::after,#devin-exporter-settings button.is-loading::after{width:10px;height:10px;margin-left:5px;border-width:1px}
+#devin-exporter-balance{padding:4px 7px;border-radius:4px}
+#devin-exporter-status{max-width:200px}
+#devin-exporter-settings{right:12px;bottom:56px;width:min(420px,calc(100vw - 24px));max-height:84vh;padding:9px 10px;border-radius:8px;box-shadow:none}
+#devin-exporter-settings h2{font-size:14px}
+#devin-exporter-settings h3{margin-bottom:4px;font-size:10px}
+#devin-exporter-settings p{margin:4px 0 7px;font-size:11px;line-height:1.35}
+.devin-settings-header{margin-bottom:7px}
+.devin-close-x{padding:1px 6px!important;font-size:15px;line-height:1}
+.devin-icon-btn{padding:2px 6px!important;font-size:13px}
+.devin-current{padding:7px 9px;margin-bottom:8px;border-radius:6px}
+.devin-current-line{gap:6px}
+.devin-current-email{font-size:12px}
+.devin-current-meta{font-size:11px}
+.devin-current-actions{margin-top:5px}
+.devin-current-actions button{padding:4px 8px;font-size:11px}
+.devin-field-row{gap:6px}
+.devin-field{gap:2px;font-size:10px}
+.devin-toggle-row{gap:4px 12px;margin:7px 0 1px}
+.devin-toggle-row label{font-size:11px}
+.devin-details{margin-top:7px}
+.devin-details summary{font-size:11px}
+.devin-details textarea{height:90px}
+#devin-exporter-settings input[type="number"],#devin-exporter-settings input[type="search"],#devin-exporter-settings input[type="text"],#devin-exporter-settings input[type="password"],#devin-exporter-settings textarea{margin:2px 0;padding:6px 7px;border-radius:4px;font-size:12px}
+#devin-exporter-settings input[type="checkbox"]{width:14px;height:14px}
+#devin-exporter-settings textarea{height:108px}
+#devin-exporter-settings label{gap:5px;margin:5px 0;font-size:12px}
+.devin-settings-section{padding:8px 0}
+.devin-settings-actions{gap:4px;margin-top:5px}
+#devin-exporter-settings textarea#devin-batch-accounts{height:56px}
+#devin-account-list{border-radius:6px}
+.devin-account-empty{padding:10px;font-size:11px}
+.devin-account-batchbar{gap:6px;padding:5px 7px}
+.devin-batch-selectall{gap:5px;font-size:11px}
+.devin-account-batchbar button{padding:4px 7px;font-size:11px}
+.devin-account-row{gap:3px;padding:7px 8px}
+.devin-account-main{gap:6px}
+.devin-account-identity{gap:0}
+.devin-account-identity strong{font-size:12px}
+.devin-account-identity span{font-size:10px}
+.devin-account-balance{font-size:11px}
+.devin-account-meta{gap:3px;padding-left:22px;font-size:10px}
+.devin-account-actions{flex-wrap:nowrap;gap:3px;padding-left:22px;white-space:nowrap}
+.devin-account-actions button{flex:none;padding:3px 7px;font-size:11px}
+.devin-account-actions button.devin-account-action-icon{display:inline-flex;width:23px;height:22px;align-items:center;justify-content:center;padding:0;font-size:13px;line-height:1}
+.devin-account-sessions{margin-top:3px;padding:6px;border-radius:5px}
+.devin-session-filter{margin-bottom:5px}
+.devin-session-list{gap:2px;max-height:210px}
+.devin-session-row{gap:4px;padding:3px 2px}
+.devin-session-title{font-size:11px}
+.devin-session-row button{padding:3px 6px;font-size:10px}
+.devin-session-empty{padding:3px 2px;font-size:11px}
+.devin-update-notice{margin-bottom:7px;padding:6px 8px;font-size:11px;border-radius:5px}
+.devin-account-badge{padding:0 4px;font-size:9px;border-radius:6px}
+.devin-snippet-row{gap:4px;padding:4px 0}
+.devin-snippet-title{font-size:11px}
+.devin-snippet-row button{padding:3px 7px;font-size:11px}
+#devin-snippet-text{height:56px}
