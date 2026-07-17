@@ -50,7 +50,7 @@ available.)
 ### Load-unpacked install (no store, no admin, personal machines)
 
 `install/load-unpacked-windows.cmd` downloads the latest extension to a fixed
-folder (`%LOCALAPPDATA%\DevinSessionExporter`) and opens `chrome://extensions`.
+folder (`%USERPROFILE%\Downloads\DevinSessionExporter`) and opens `chrome://extensions`.
 Once per profile: turn on **Developer mode** → **Load unpacked** → pick that
 folder. To update later, run `install/update-unpacked-windows.cmd` and restart
 Chrome — no need to re-add it.
@@ -114,8 +114,9 @@ persisted locally, so opening the settings panel shows the last known balances
 immediately and refreshes only stale ones (older than 5 minutes) in the
 background; a failed refresh keeps the last good value instead of blanking it.
 
-The toolbar balance chip shows the account's remaining balance and per-message
-limit (`余额 $X · 上限 $Y`) and refreshes every 30 seconds. Exporting a Handoff
+The toolbar balance chip shows only the account's remaining balance
+(`余额 $X`) and refreshes every 30 seconds; the per-message limit is shown in
+the settings panel's current-account header. Exporting a Handoff
 shows a spinner on the button while it runs, and exported files are named with a
 human-readable date, e.g. `devin-handoff-2026-07-17_16-30.md`. The settings panel supports
 batch account entry, one account per line. Besides `email---password---ignored`
@@ -210,7 +211,7 @@ Chrome 企业策略（自托管、强制安装）把插件装到**本机所有 C
 ### 加载已解压安装（不走商店、免管理员、适合个人电脑）
 
 `install/load-unpacked-windows.cmd` 会把最新插件下载到固定目录
-（`%LOCALAPPDATA%\DevinSessionExporter`）并打开 `chrome://extensions`。每个 profile
+（`%USERPROFILE%\Downloads\DevinSessionExporter`，即系统「下载」目录）并打开 `chrome://extensions`。每个 profile
 点一次：打开**开发者模式** →「加载已解压」→ 选该目录。之后更新只需运行
 `install/update-unpacked-windows.cmd` 再重启 Chrome，无需重新添加。
 

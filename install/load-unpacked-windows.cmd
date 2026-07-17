@@ -5,7 +5,11 @@ rem Downloads the latest extension to a fixed folder, then you click
 rem "Load unpacked" once per Chrome profile. Updating = run
 rem update-unpacked-windows.cmd and restart Chrome (no re-adding).
 
-set "DEST=%LOCALAPPDATA%\DevinSessionExporter"
+rem Install into the system Downloads folder (reads its real path from the
+rem registry in case it was moved; falls back to %USERPROFILE%\Downloads).
+set "DL=%USERPROFILE%\Downloads"
+for /f "tokens=2,*" %%a in ('reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders" /v "{374DE290-123F-4565-9164-39C4925E467B}" 2^>nul') do set "DL=%%b"
+set "DEST=%DL%\DevinSessionExporter"
 set "ZIPURL=https://github.com/wookat/devin-session-exporter/releases/latest/download/devin-session-exporter.zip"
 set "ZIP=%TEMP%\devin-session-exporter.zip"
 
