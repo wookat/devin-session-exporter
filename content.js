@@ -600,73 +600,25 @@ async function extractConversation(options = {}) {
   };
 }
 
-const DEFAULT_HANDOFF_TEMPLATE = `你现在需要接入并使用我的远程 GPU 集群。当前阶段不要自行选择项目，也不要运行训练；先完成连接、了解集群使用方法，然后等待我提供具体任务。
+const DEFAULT_HANDOFF_TEMPLATE = `你是接手这个项目的新会话。下面是上一个会话导出的交接上下文，请先完整阅读并理解，然后接着这个项目继续完成未完成的任务。若有不清楚的地方，先根据上下文自行判断，必要时再问我。
 
-【接入方式】
-
-1. 检查 Tailscale：
-   tailscale status
-
-2. 如果没有安装：
-   curl -fsSL https://tailscale.com/install.sh | sh
-
-3. 需要 Tailscale auth key 时向我索取。不要把密钥保存到代码、脚本、日志或文档中。
-
-4. 接入后连接主服务器：
-   ssh dell@xu-1
-
-5. 如果出现 Tailscale Check 授权链接，把完整链接发给我，等待我放行。
-
-【集群结构】
-
-- xu-1：统一入口、代码和实验产物的长期存储节点，也可以参与训练；
-- xu-2、xu-3、xu-4：训练节点；
-- temp-www、temp-lx：可参与调度的临时训练节点；
-- temp-hb：禁止加入自动调度，只能在我明确要求时单独连接使用。
-
-已经配置从 xu-1 到训练节点的免交互 SSH。连接 xu-1 后，正常情况下不需要再次向我索取其他节点的密码或授权。
-
-集群使用轻量 SSH GPU 调度器 \`sgpu\`，不使用 SLURM。登录 xu-1 后，先查找并阅读现有的 sgpu 帮助、配置和使用说明，例如：
-
-sgpu --help
-
-如果命令不在 PATH 中，请在不修改系统环境的前提下查找其实际位置、README 或管理脚本。不要重新安装、重写或替换现有调度器。
-
-【使用规则】
-
-1. GPU 训练任务优先通过 sgpu 提交，不要直接登录节点抢占 GPU。
-2. 提交前检查节点、GPU、运行任务和排队任务状态。
-3. 不要重复提交已经运行或排队的任务。
-4. 不要停止、修改或干扰其他用户及其他项目的任务。
-5. 不要让前台 SSH 会话承载长时间训练；任务应在 Devin 断开后继续运行。
-6. 代码可以从 xu-1 同步到计算节点，但训练节点不能作为唯一存储位置。
-7. 日志、指标、结果、checkpoint 和重要权重必须回传 xu-1。
-8. 不清理 temp-* 上的任何文件。
-9. 不修改服务器现有的 Python、Conda、CUDA、驱动或系统环境。
-10. temp-hb 不得通过 sgpu 使用，除非我明确要求人工单独连接它。
-
-【完成接入后的汇报】
-
-先进行只读检查，然后告诉我：
-
-- Tailscale 和 xu-1 是否连接成功；
-- sgpu 的实际位置和基本调用方式；
-- 当前可调度节点；
-- 各节点当前是否在线以及 GPU 是否空闲；
-- 当前运行和排队中的任务；
-- 如何提交、查看日志、取消任务和取回结果；
-- 你准备使用的标准提交命令模板。
-
-当前只检查和学习，不提交训练、不取消任务、不修改配置。完成汇报后等待我提供项目目录和训练命令。
-
-项目创建在~/wookat下面，所有证据和材料都需要保证到xu-1服务器上，当前设备作为临时的，随时可能切换到新的设备新的会话继续完成任务。
-
-【上一会话的上下文（用于续接）】
-
-以下是上一个会话导出的交接信息。接入 xu-1 后，请先阅读 ~/wookat 下的项目目录与已保存的证据/材料，再结合下面的上下文继续未完成的任务；若与「等待我提供任务」冲突，以继续未完成任务为准。
+【上一会话的上下文】
 
 {{HANDOFF}}
 `;
+
+// Kept as an example the user can drop into the prompt quick-clipboard; it is no
+// longer forced into every continuation.
+const SAMPLE_REMOTE_PROMPT = `你现在需要接入并使用我的远程 GPU 集群。当前阶段不要自行选择项目，也不要运行训练；先完成连接、了解集群使用方法，然后等待我提供具体任务。
+
+【接入方式】
+1. 检查 Tailscale：tailscale status
+2. 如果没有安装：curl -fsSL https://tailscale.com/install.sh | sh
+3. 需要 Tailscale auth key 时向我索取。不要把密钥保存到代码、脚本、日志或文档中。
+4. 接入后连接主服务器：ssh dell@xu-1
+5. 如果出现 Tailscale Check 授权链接，把完整链接发给我，等待我放行。
+
+项目创建在 ~/wookat 下面，所有证据和材料都需要保存到 xu-1 服务器上，当前设备作为临时的，随时可能切换到新的设备新的会话继续完成任务。`;
 
 const HANDOFF_COLLAPSE_PLACEHOLDER = "[续接自前序会话；完整历史见 xu-1 上的 ~/wookat 与 CONTINUATION.md]";
 
@@ -925,7 +877,7 @@ function selectNextAccount(accounts, currentEmail, lastUsedEmail = "", options =
   const balances = options.balances instanceof Map ? options.balances : null;
   const minBalance = Number.isFinite(options.minBalance) ? options.minBalance : null;
   let ordered = Array.isArray(accounts) ? accounts.filter((account) => (
-    account && typeof account.email === "string" && account.email.trim()
+    account && typeof account.email === "string" && account.email.trim() && !account.archived
   )) : [];
   if (balances && minBalance != null) {
     ordered = ordered.filter((account) => {
@@ -1136,6 +1088,36 @@ function currentAccountEmail() {
   }
 }
 
+let currentEmailCache = "";
+async function resolveCurrentAccountEmail() {
+  const local = currentAccountEmail();
+  if (local) {
+    currentEmailCache = local;
+    return local;
+  }
+  try {
+    const authSession = readAuthSession();
+    if (!authSession?.token) return currentEmailCache;
+    const response = await fetch("/api/users/post-auth", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${authSession.token}`,
+        "content-type": "application/json",
+        accept: "application/json"
+      },
+      body: "{}"
+    });
+    if (!response.ok) return currentEmailCache;
+    const data = await response.json();
+    const email = data?.email || data?.user_email || data?.user?.email
+      || data?.user?.user_email || data?.account?.email || "";
+    if (email) currentEmailCache = email;
+    return currentEmailCache;
+  } catch {
+    return currentEmailCache;
+  }
+}
+
 function isQuotaExceeded() {
   const text = document.body?.innerText || "";
   return /usage quota exceeded|usage quota has been exceeded|out of on-demand usage|ran out of free credits/i.test(text);
@@ -1229,11 +1211,23 @@ function clickSendButton() {
   return true;
 }
 
+let toolbarStatusTimer = null;
 function setToolbarStatus(message, isError = false) {
   const element = document.getElementById("devin-exporter-status");
-  if (element) {
-    element.textContent = message;
-    element.dataset.error = isError ? "true" : "false";
+  if (!element) return;
+  element.textContent = message;
+  element.dataset.error = isError ? "true" : "false";
+  if (toolbarStatusTimer) {
+    clearTimeout(toolbarStatusTimer);
+    toolbarStatusTimer = null;
+  }
+  // Keep errors visible; transient success/progress notices clear themselves so
+  // the floating bar does not permanently display account chatter.
+  if (message && !isError) {
+    toolbarStatusTimer = setTimeout(() => {
+      const current = document.getElementById("devin-exporter-status");
+      if (current && current.dataset.error !== "true") current.textContent = "";
+    }, 4000);
   }
 }
 
@@ -1802,15 +1796,54 @@ const SESSION_STATUS_LABELS = {
   running: "正在运行",
   working: "正在运行",
   in_progress: "正在运行",
+  resumed: "正在运行",
   blocked: "等待输入",
   waiting: "等待输入",
+  waiting_for_user: "等待输入",
   finished: "已完成",
   completed: "已完成",
   done: "已完成",
+  exit: "已结束",
+  exited: "已结束",
   stopped: "已停止",
+  paused: "已暂停",
+  suspended: "已休眠",
+  sleeping: "已休眠",
+  archived: "已归档",
+  cancelled: "已取消",
+  canceled: "已取消",
   expired: "已过期",
-  failed: "失败"
+  timeout: "超时",
+  timed_out: "超时",
+  error: "出错",
+  failed: "失败",
+  queued: "排队中",
+  initializing: "准备中",
+  starting: "准备中"
 };
+
+const SESSION_STATUS_ICONS = {
+  正在运行: "🟢",
+  等待输入: "🟡",
+  已完成: "✅",
+  已结束: "⚪",
+  已停止: "⏹️",
+  已暂停: "⏸️",
+  已休眠: "😴",
+  已归档: "📦",
+  已取消: "🚫",
+  已过期: "⌛",
+  超时: "⌛",
+  出错: "❌",
+  失败: "❌",
+  排队中: "⏳",
+  准备中: "⏳",
+  状态未知: "❔"
+};
+
+function sessionStatusIcon(status) {
+  return SESSION_STATUS_ICONS[formatSessionStatus(status)] || "❔";
+}
 
 function accountKey(account) {
   return String(account?.email || "").trim().toLowerCase();
@@ -2138,6 +2171,104 @@ function renderAccountBatchBar(list) {
   list.appendChild(bar);
 }
 
+const PROMPT_SNIPPETS_KEY = "promptSnippets";
+let promptSnippets = [];
+
+async function loadPromptSnippets() {
+  try {
+    const stored = await storageGet([PROMPT_SNIPPETS_KEY]);
+    const saved = stored[PROMPT_SNIPPETS_KEY];
+    if (Array.isArray(saved)) {
+      promptSnippets = saved.filter((item) => item && typeof item.text === "string");
+    } else {
+      // Seed once with the remote-cluster prompt as an example so it is not lost.
+      promptSnippets = [{ title: "远程 GPU 集群接入", text: SAMPLE_REMOTE_PROMPT }];
+      await storageSet({ [PROMPT_SNIPPETS_KEY]: promptSnippets });
+    }
+  } catch {
+    promptSnippets = [];
+  }
+}
+
+async function savePromptSnippets() {
+  try {
+    await storageSet({ [PROMPT_SNIPPETS_KEY]: promptSnippets });
+  } catch {
+    // Persisting snippets is best-effort.
+  }
+}
+
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    let ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch {
+      ok = false;
+    }
+    area.remove();
+    return ok;
+  }
+}
+
+function renderPromptSnippets() {
+  const list = document.getElementById("devin-snippet-list");
+  if (!list) return;
+  list.textContent = "";
+  if (!promptSnippets.length) {
+    const empty = document.createElement("div");
+    empty.className = "devin-account-empty";
+    empty.textContent = "还没有提示词，在下方添加。";
+    list.appendChild(empty);
+    return;
+  }
+  promptSnippets.forEach((snippet, index) => {
+    const row = document.createElement("div");
+    row.className = "devin-snippet-row";
+    const title = document.createElement("span");
+    title.className = "devin-snippet-title";
+    title.textContent = snippet.title || snippet.text.slice(0, 24);
+    title.title = snippet.text;
+    const copy = createButton("复制", async () => {
+      const ok = await copyToClipboard(snippet.text);
+      setToolbarStatus(ok ? "已复制到剪贴板" : "复制失败，请手动复制", !ok);
+    });
+    const remove = createButton("删除", () => {
+      promptSnippets.splice(index, 1);
+      savePromptSnippets();
+      renderPromptSnippets();
+    });
+    row.append(title, copy, remove);
+    list.appendChild(row);
+  });
+}
+
+function addPromptSnippetFromPanel() {
+  const titleInput = document.getElementById("devin-snippet-title");
+  const textInput = document.getElementById("devin-snippet-text");
+  const text = String(textInput?.value || "").trim();
+  if (!text) {
+    setToolbarStatus("提示词内容不能为空", true);
+    return;
+  }
+  const title = String(titleInput?.value || "").trim() || text.slice(0, 24);
+  promptSnippets.push({ title, text });
+  savePromptSnippets();
+  if (titleInput) titleInput.value = "";
+  if (textInput) textInput.value = "";
+  renderPromptSnippets();
+  setToolbarStatus("已保存提示词");
+}
+
 function renderAccountRows() {
   const list = document.getElementById("devin-account-list");
   if (!list) return;
@@ -2153,7 +2284,7 @@ function renderAccountRows() {
   accountDraft.forEach((account, index) => {
     const key = accountKey(account);
     const row = document.createElement("div");
-    row.className = "devin-account-row";
+    row.className = account.archived ? "devin-account-row devin-account-archived" : "devin-account-row";
 
     const main = document.createElement("div");
     main.className = "devin-account-main";
@@ -2172,6 +2303,12 @@ function renderAccountRows() {
     name.textContent = `${index + 1}. ${account.label || account.email}`;
     name.title = account.email;
     identity.appendChild(name);
+    if (account.archived) {
+      const badge = document.createElement("span");
+      badge.className = "devin-account-badge";
+      badge.textContent = "已归档";
+      identity.appendChild(badge);
+    }
     if (account.label && account.label !== account.email) {
       const email = document.createElement("span");
       email.textContent = account.email;
@@ -2193,9 +2330,10 @@ function renderAccountRows() {
       link.href = "#";
       link.className = "devin-account-latest-link";
       link.title = "点击打开该会话（不换号）";
+      const statusText = `${sessionStatusIcon(latest.session.status)} ${formatSessionStatus(latest.session.status)}`;
       link.textContent = latest.session.title
-        ? `${latest.session.title} · ${formatSessionStatus(latest.session.status)}`
-        : formatSessionStatus(latest.session.status);
+        ? `${latest.session.title} · ${statusText}`
+        : statusText;
       link.addEventListener("click", (event) => {
         event.preventDefault();
         openLatestSession(account, latest.session).catch((error) => setToolbarStatus(error.message, true));
@@ -2219,11 +2357,21 @@ function renderAccountRows() {
         const textarea = document.getElementById("devin-batch-accounts");
         if (textarea) {
           const parts = [account.email || "", account.password || ""];
-          if (account.label) parts.push(account.label);
+          if (account.label && account.label !== account.email) parts.push(account.label);
           textarea.value = parts.join("---");
           textarea.focus();
         }
         setToolbarStatus("已填入文本框，修改后点「添加账号」按相同邮箱更新");
+      }),
+      createButton(account.archived ? "取消归档" : "归档", async () => {
+        account.archived = !account.archived;
+        try {
+          await saveManagedAccounts(accountDraft, document.getElementById("devin-encrypt-accounts")?.checked === true);
+          setToolbarStatus(account.archived ? "已归档（仍保存、可查看，不参与自动换号）" : "已取消归档");
+        } catch (error) {
+          setToolbarStatus(error.message, true);
+        }
+        renderAccountRows();
       }),
       createButton("删除", () => {
         selectedAccountKeys.add(key);
@@ -2270,9 +2418,12 @@ async function openSettingsPanel() {
       ? Number(values.switchMinBalance)
       : DEFAULT_SWITCH_MIN_BALANCE;
     selectedAccountKeys.clear();
-    await Promise.all([loadPersistedBalances(), loadPersistedLatestSessions()]);
+    await Promise.all([loadPersistedBalances(), loadPersistedLatestSessions(), loadPromptSnippets()]);
     renderAccountRows();
+    renderPromptSnippets();
     panel.hidden = false;
+    renderUpdateNotice();
+    checkForUpdate().catch(() => {});
     refreshCurrentAccount().catch((error) => setToolbarStatus(error.message, true));
     refreshStaleAccountMeta().catch((error) => setToolbarStatus(error.message, true));
   } catch (error) {
@@ -2401,6 +2552,70 @@ async function exportHandoffInPage() {
   }
 }
 
+const UPDATE_CHECK_KEY = "lastUpdateCheck";
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const LATEST_RELEASE_API = "https://api.github.com/repos/wookat/devin-session-exporter/releases/latest";
+let updateAvailableVersion = "";
+
+function currentExtensionVersion() {
+  try {
+    return extensionApi?.runtime?.getManifest?.().version || "";
+  } catch {
+    return "";
+  }
+}
+
+function compareVersions(a, b) {
+  const pa = String(a).split(".").map((n) => parseInt(n, 10) || 0);
+  const pb = String(b).split(".").map((n) => parseInt(n, 10) || 0);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i += 1) {
+    const diff = (pa[i] || 0) - (pb[i] || 0);
+    if (diff !== 0) return diff > 0 ? 1 : -1;
+  }
+  return 0;
+}
+
+function renderUpdateNotice() {
+  const notice = document.getElementById("devin-update-notice");
+  if (!notice) return;
+  if (updateAvailableVersion) {
+    notice.hidden = false;
+    notice.textContent = `有新版 v${updateAvailableVersion}：双击 update-unpacked-windows.cmd 后重启 Chrome 即可更新。`;
+  } else {
+    notice.hidden = true;
+    notice.textContent = "";
+  }
+}
+
+async function checkForUpdate(force = false) {
+  try {
+    const current = currentExtensionVersion();
+    if (!current) return;
+    if (!force) {
+      const stored = await storageGet([UPDATE_CHECK_KEY]);
+      const last = Number(stored[UPDATE_CHECK_KEY]);
+      if (Number.isFinite(last) && Date.now() - last < UPDATE_CHECK_INTERVAL_MS) {
+        renderUpdateNotice();
+        return;
+      }
+    }
+    const response = await fetch(LATEST_RELEASE_API, { headers: { accept: "application/vnd.github+json" } });
+    await storageSet({ [UPDATE_CHECK_KEY]: Date.now() });
+    if (!response.ok) return;
+    const data = await response.json();
+    const latest = String(data?.tag_name || "").replace(/^ext-v/i, "").trim();
+    if (latest && compareVersions(latest, current) > 0) {
+      updateAvailableVersion = latest;
+    } else {
+      updateAvailableVersion = "";
+    }
+    renderUpdateNotice();
+  } catch {
+    // Update checks are best-effort; ignore network/CORS failures.
+  }
+}
+
 function installToolbar() {
   if (document.getElementById("devin-exporter-toolbar")) return;
   const style = document.createElement("style");
@@ -2487,6 +2702,14 @@ function installToolbar() {
     .devin-session-title{flex:1;min-width:0;overflow:hidden;font-size:12px;color:#c1c9d6;text-overflow:ellipsis;white-space:nowrap}
     .devin-session-row button{padding:3px 8px;font-size:11px;white-space:nowrap;background:#1e242e}
     .devin-session-empty{padding:4px 2px;font-size:12px;color:#7f8896}
+    .devin-update-notice{margin-bottom:10px;padding:8px 10px;font-size:12px;color:#ffd479;border:1px solid #4a3d1e;border-radius:8px;background:#26200f}
+    .devin-account-archived{opacity:.6}
+    .devin-account-badge{flex:none;align-self:flex-start;padding:0 6px;font-size:10px;color:#c1c9d6;border:1px solid #333b47;border-radius:8px;background:#1e242e}
+    .devin-snippet-row{display:flex;gap:6px;align-items:center;padding:5px 0;border-top:1px solid #191e26}
+    .devin-snippet-row:first-child{border-top:0}
+    .devin-snippet-title{flex:1;min-width:0;overflow:hidden;font-size:12px;color:#c1c9d6;text-overflow:ellipsis;white-space:nowrap}
+    .devin-snippet-row button{padding:4px 9px;font-size:12px;background:#1e242e}
+    #devin-snippet-text{height:64px}
   `;
   document.documentElement.appendChild(style);
   const toolbar = document.createElement("div");
@@ -2507,6 +2730,8 @@ function installToolbar() {
       <h2>Devin Exporter</h2>
       <button id="devin-close-settings" type="button" class="devin-close-x" title="关闭">×</button>
     </div>
+
+    <div id="devin-update-notice" class="devin-update-notice" hidden></div>
 
     <div id="devin-current-account" class="devin-current">
       <div class="devin-current-line">
@@ -2538,10 +2763,19 @@ function installToolbar() {
         <button id="devin-save-settings" type="button" class="devin-primary">保存设置</button>
       </div>
       <details class="devin-details">
-        <summary>续接模板</summary>
+        <summary>续接模板（固定：交出上下文，接手继续）</summary>
         <textarea id="devin-template" placeholder="续接模板"></textarea>
         <div class="devin-settings-actions">
           <button id="devin-reset-template" type="button">恢复默认模板</button>
+        </div>
+      </details>
+      <details class="devin-details">
+        <summary>提示词快捷剪贴板</summary>
+        <div id="devin-snippet-list"></div>
+        <input id="devin-snippet-title" type="text" placeholder="标题（如：安装 skill / 连接仓库 / 连远程）">
+        <textarea id="devin-snippet-text" placeholder="提示词内容，保存后可一键复制"></textarea>
+        <div class="devin-settings-actions">
+          <button id="devin-snippet-add" type="button">添加提示词</button>
         </div>
       </details>
     </section>
@@ -2549,7 +2783,7 @@ function installToolbar() {
     <section class="devin-settings-section">
       <h3>已保存账号</h3>
       <div id="devin-account-list"></div>
-      <textarea id="devin-batch-accounts" placeholder="每行一个账号：邮箱---密码---可选备注"></textarea>
+      <textarea id="devin-batch-accounts" placeholder="每行一个账号：邮箱---密码（第三段及以后忽略）"></textarea>
       <div class="devin-settings-actions"><button id="devin-batch-add" type="button">添加账号</button></div>
     </section>
   `;
@@ -2568,6 +2802,7 @@ function installToolbar() {
   panel.querySelector("#devin-batch-add").addEventListener("click", () => {
     addBatchAccountsFromPanel().catch((error) => setToolbarStatus(error.message, true));
   });
+  panel.querySelector("#devin-snippet-add").addEventListener("click", addPromptSnippetFromPanel);
   panel.querySelector("#devin-apply-limit").addEventListener("click", applyTargetUsageLimit);
   panel.querySelector("#devin-refresh-current").addEventListener("click", () => {
     refreshCurrentAccount().catch((error) => setToolbarStatus(error.message, true));
@@ -2614,8 +2849,7 @@ async function refreshBalanceDisplay() {
 }
 
 function renderCurrentAccount(element, info) {
-  const email = currentAccountEmail() || "未登录";
-  element.querySelector(".devin-current-email").textContent = email;
+  element.querySelector(".devin-current-email").textContent = currentEmailCache || "未登录";
   const meta = element.querySelector(".devin-current-meta");
   if (info) {
     meta.textContent = formatBalanceDisplay(info);
@@ -2630,11 +2864,12 @@ async function refreshCurrentAccount() {
   const element = document.getElementById("devin-current-account");
   if (!element) return;
   renderCurrentAccount(element, null);
-  try {
-    renderCurrentAccount(element, await fetchBillingInfo());
-  } catch {
-    renderCurrentAccount(element, null);
-  }
+  const [email, info] = await Promise.all([
+    resolveCurrentAccountEmail().catch(() => currentEmailCache),
+    fetchBillingInfo().catch(() => null)
+  ]);
+  currentEmailCache = email || currentEmailCache;
+  renderCurrentAccount(element, info);
 }
 
 const isAppHost = typeof location !== "undefined" && location.hostname === "app.devin.ai";
@@ -2645,6 +2880,8 @@ if (typeof document !== "undefined" && isAutoSwitchHost) {
   if (isAppHost) {
     installToolbar();
     updateToolbar();
+    checkForUpdate().catch(() => {});
+    setInterval(() => checkForUpdate().catch(() => {}), UPDATE_CHECK_INTERVAL_MS);
     setInterval(() => refreshBalanceDisplay(), 30000);
     new MutationObserver(() => {
       installToolbar();
@@ -2701,6 +2938,8 @@ if (typeof module !== "undefined") {
     normalizeSessionRecord,
     pickLatestSession,
     formatSessionStatus,
+    sessionStatusIcon,
+    compareVersions,
     buildVauthPayload,
     buildIsolatedSessionUrl,
     selectNextAccount,
