@@ -1356,6 +1356,18 @@ function isQuotaExceeded() {
   return /usage quota exceeded|usage quota has been exceeded|out of on-demand usage|ran out of free credits/i.test(text);
 }
 
+const QUOTA_CHECK_INTERVAL_MS = 5000;
+let quotaCheckAt = 0;
+let quotaExceededCache = false;
+
+function isQuotaExceededThrottled() {
+  const now = Date.now();
+  if (now - quotaCheckAt < QUOTA_CHECK_INTERVAL_MS) return quotaExceededCache;
+  quotaCheckAt = now;
+  quotaExceededCache = isQuotaExceeded();
+  return quotaExceededCache;
+}
+
 function findButtonContaining(text) {
   return [...document.querySelectorAll("button")].find((button) => {
     const style = getComputedStyle(button);
@@ -1812,9 +1824,13 @@ async function runAutoSwitch() {
   try {
     const settings = await storageGet(["autoSwitchEnabled", "autoSwitchState"]);
     const state = settings.autoSwitchState || { phase: "idle" };
+    const autoSwitchEnabled = settings.autoSwitchEnabled === true;
+    const onSessionPage = isSessionPage();
     const action = routeAutoSwitch(location.href, state, {
-      enabled: settings.autoSwitchEnabled === true,
-      quotaExceeded: isQuotaExceeded(),
+      enabled: autoSwitchEnabled,
+      quotaExceeded: autoSwitchEnabled && onSessionPage
+        ? isQuotaExceededThrottled()
+        : false,
       loggedOut: !localStorage.getItem("auth1_session")
     });
     if (action === "beginSwitch") await beginAutoSwitch(false);
