@@ -1249,10 +1249,13 @@ function loginErrorVisible() {
 }
 
 function accountAvailableBalance(info = {}) {
-  const available = Number(info.availableCredits);
-  if (Number.isFinite(available)) return available;
+  // Devin's "Remaining balance" is billing_status.overage_credits (can be
+  // negative once exhausted). available_credits is often 0 on pay-as-you-go
+  // accounts, so it must not be treated as the balance.
   const overage = Number(info.overageCredits);
-  return Number.isFinite(overage) ? overage : NaN;
+  if (Number.isFinite(overage)) return overage;
+  const available = Number(info.availableCredits);
+  return Number.isFinite(available) ? available : NaN;
 }
 
 function formatBalanceDisplay(info = {}) {
@@ -1679,15 +1682,57 @@ function mergeBatchAccounts(existing, text) {
   };
 }
 
+const BALANCE_STORAGE_KEY = "accountBalances";
+const BALANCE_STALE_MS = 5 * 60 * 1000;
+
+function isUsableBalance(info) {
+  return Boolean(info) && !info.loading && Number.isFinite(accountAvailableBalance(info));
+}
+
+async function loadPersistedBalances() {
+  try {
+    const stored = await storageGet([BALANCE_STORAGE_KEY]);
+    const saved = stored[BALANCE_STORAGE_KEY];
+    if (saved && typeof saved === "object") {
+      for (const [key, info] of Object.entries(saved)) {
+        if (info && typeof info === "object" && !accountBalanceCache.has(key)) {
+          accountBalanceCache.set(key, info);
+        }
+      }
+    }
+  } catch {
+    // Missing/corrupt persisted balances are non-fatal.
+  }
+}
+
+async function persistBalances() {
+  const saved = {};
+  for (const [key, info] of accountBalanceCache.entries()) {
+    if (isUsableBalance(info)) {
+      const { staleError, ...clean } = info;
+      saved[key] = clean;
+    }
+  }
+  try {
+    await storageSet({ [BALANCE_STORAGE_KEY]: saved });
+  } catch {
+    // Persisting the balance cache is best-effort.
+  }
+}
+
 function formatAccountBalance(info) {
   if (info?.loading) return "查询中…";
+  if (isUsableBalance(info)) {
+    return info.staleError ? `${formatBalanceDisplay(info)} · 刷新失败` : formatBalanceDisplay(info);
+  }
   if (info?.error) return info.error;
-  return formatBalanceDisplay(info);
+  return "余额 — · 上限 —";
 }
 
 function accountBalanceClass(info) {
-  if (!info || info.error) return "account-balance-error";
-  return balanceToneClass(info).replace("balance-", "account-balance-");
+  if (isUsableBalance(info)) return balanceToneClass(info).replace("balance-", "account-balance-");
+  if (info?.error) return "account-balance-error";
+  return "";
 }
 
 async function readTargetUsageLimitSafe() {
@@ -1699,30 +1744,37 @@ async function readTargetUsageLimitSafe() {
 async function queryAccountBalance(account, options = {}) {
   const key = String(account.email || "").trim().toLowerCase();
   if (!key) return null;
+  const previous = accountBalanceCache.get(key);
   accountBalanceCache.set(key, { loading: true });
   renderAccountRows();
   try {
     const info = options.provisionLimit != null
       ? await provisionAccount(account.email, account.password, options.provisionLimit)
       : await fetchBalanceForCredentials(account.email, account.password);
+    info.fetchedAt = Date.now();
     accountBalanceCache.set(key, info);
     renderAccountRows();
+    await persistBalances();
     return info;
   } catch (error) {
-    const info = { error: error.message || "无法查询余额" };
-    accountBalanceCache.set(key, info);
+    // Keep the last known balance visible instead of blanking the row.
+    const fallback = isUsableBalance(previous)
+      ? { ...previous, staleError: error.message || "刷新失败" }
+      : { error: error.message || "无法查询余额" };
+    accountBalanceCache.set(key, fallback);
     renderAccountRows();
-    return info;
+    return fallback;
   }
 }
 
 async function ensureAccountBalances(accounts) {
+  await loadPersistedBalances();
   const map = new Map();
   for (const account of Array.isArray(accounts) ? accounts : []) {
     const key = accountKey(account);
     if (!key) continue;
     let info = accountBalanceCache.get(key);
-    if (!info || info.error || info.loading) {
+    if (!isUsableBalance(info)) {
       info = await queryAccountBalance(account);
     }
     if (info) map.set(key, info);
@@ -1730,10 +1782,24 @@ async function ensureAccountBalances(accounts) {
   return map;
 }
 
-async function refreshAllAccountBalances() {
-  const target = await readTargetUsageLimitSafe();
+function isFreshBalance(info) {
+  return isUsableBalance(info)
+    && !info.staleError
+    && Number.isFinite(info.fetchedAt)
+    && Date.now() - info.fetchedAt < BALANCE_STALE_MS;
+}
+
+async function refreshStaleAccountBalances() {
   for (const account of accountDraft) {
-    await queryAccountBalance(account, { provisionLimit: target });
+    if (isFreshBalance(accountBalanceCache.get(accountKey(account)))) continue;
+    await queryAccountBalance(account);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+}
+
+async function refreshAllAccountBalances() {
+  for (const account of accountDraft) {
+    await queryAccountBalance(account);
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
 }
@@ -1958,8 +2024,10 @@ async function openSettingsPanel() {
     panel.querySelector("#devin-switch-min-balance").value = Number.isFinite(Number(values.switchMinBalance))
       ? Number(values.switchMinBalance)
       : DEFAULT_SWITCH_MIN_BALANCE;
+    await loadPersistedBalances();
     renderAccountRows();
     panel.hidden = false;
+    refreshStaleAccountBalances().catch((error) => setToolbarStatus(error.message, true));
   } catch (error) {
     setToolbarStatus(error.message, true);
   }
