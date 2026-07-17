@@ -1571,7 +1571,6 @@ async function runAutoSwitch() {
 }
 
 let accountDraft = [];
-let editingAccountIndex = -1;
 const accountBalanceCache = new Map();
 
 const ACCOUNT_LINE_DELIMITERS = [
@@ -1904,11 +1903,14 @@ function renderAccountRows() {
         toggleAccountSessions(account).catch((error) => setToolbarStatus(error.message, true));
       }),
       makeButton("编辑", () => {
-        accountBalanceCache.delete(key);
-        document.getElementById("devin-account-label").value = account.label || "";
-        document.getElementById("devin-account-email").value = account.email || "";
-        document.getElementById("devin-account-password").value = account.password || "";
-        editingAccountIndex = index;
+        const textarea = document.getElementById("devin-batch-accounts");
+        if (textarea) {
+          const parts = [account.email || "", account.password || ""];
+          if (account.label) parts.push(account.label);
+          textarea.value = parts.join("---");
+          textarea.focus();
+        }
+        setToolbarStatus("已填入文本框，修改后点「添加账号」按相同邮箱更新");
       }),
       makeButton("删除", () => {
         accountBalanceCache.delete(key);
@@ -1966,27 +1968,6 @@ async function openSettingsPanel() {
 async function saveSettingsPanel() {
   const panel = document.getElementById("devin-exporter-settings");
   if (!panel) return;
-  const label = panel.querySelector("#devin-account-label");
-  const email = panel.querySelector("#devin-account-email");
-  const password = panel.querySelector("#devin-account-password");
-  if (email.value.trim() || password.value) {
-    const account = {
-      label: label.value.trim(),
-      email: email.value.trim(),
-      password: password.value
-    };
-    if (!account.email || !account.password) {
-      setToolbarStatus("账号邮箱和密码都必须填写", true);
-      return;
-    }
-    if (editingAccountIndex >= 0) accountDraft[editingAccountIndex] = account;
-    else accountDraft.push(account);
-    editingAccountIndex = -1;
-    label.value = "";
-    email.value = "";
-    password.value = "";
-    renderAccountRows();
-  }
   const encrypted = panel.querySelector("#devin-encrypt-accounts").checked;
   const targetUsageLimit = readTargetUsageLimit(panel);
   const switchMinBalance = readSwitchMinBalance(panel);
@@ -2001,46 +1982,14 @@ async function saveSettingsPanel() {
   setToolbarStatus("账号设置已保存");
 }
 
-async function addAccountFromPanel() {
-  const panel = document.getElementById("devin-exporter-settings");
-  const label = panel.querySelector("#devin-account-label");
-  const email = panel.querySelector("#devin-account-email");
-  const password = panel.querySelector("#devin-account-password");
-  if (!email.value.trim() || !password.value) {
-    setToolbarStatus("账号邮箱和密码都必须填写", true);
-    return;
-  }
-  const account = {
-    label: label.value.trim(),
-    email: email.value.trim(),
-    password: password.value
-  };
-  if (editingAccountIndex >= 0) accountDraft[editingAccountIndex] = account;
-  else accountDraft.push(account);
-  editingAccountIndex = -1;
-  accountBalanceCache.delete(accountKey(account));
-  label.value = "";
-  email.value = "";
-  password.value = "";
-  renderAccountRows();
-  try {
-    await saveManagedAccounts(accountDraft, panel.querySelector("#devin-encrypt-accounts").checked);
-  } catch (error) {
-    setToolbarStatus(error.message || "保存账号失败", true);
-    return;
-  }
-  const target = await readTargetUsageLimitSafe();
-  setToolbarStatus(`已添加 ${account.email}，正在设置上限 $${target} 并查询余额...`);
-  const info = await queryAccountBalance(account, { provisionLimit: target });
-  setToolbarStatus(info?.error
-    ? `已添加 ${account.email}，但余额查询失败：${info.error}`
-    : `已添加 ${account.email}（${formatBalanceDisplay(info)}）`, Boolean(info?.error));
-}
-
 async function addBatchAccountsFromPanel() {
   const panel = document.getElementById("devin-exporter-settings");
   if (!panel) return;
   const textarea = panel.querySelector("#devin-batch-accounts");
+  if (!textarea.value.trim()) {
+    setToolbarStatus("请先在文本框填入账号（每行一个）", true);
+    return;
+  }
   const before = new Set(accountDraft.map((account) => accountKey(account)));
   const result = mergeBatchAccounts(accountDraft, textarea.value);
   accountDraft = result.accounts;
@@ -2054,7 +2003,7 @@ async function addBatchAccountsFromPanel() {
       panel.querySelector("#devin-encrypt-accounts").checked
     );
   } catch (error) {
-    setToolbarStatus(error.message || "批量保存账号失败", true);
+    setToolbarStatus(error.message || "保存账号失败", true);
     return;
   }
   setToolbarStatus(`已添加/更新 ${result.addedOrUpdated} 个账号，跳过 ${result.skipped} 行，正在查询余额...`);
@@ -2205,12 +2154,8 @@ function installToolbar() {
       <h3>账号</h3>
       <p>添加后自动把用量上限设为目标值并查询余额。密码仅本地保存，建议启用加密；仅支持无 2FA 的邮箱密码账号。</p>
       <div id="devin-account-list"></div>
-      <input id="devin-account-label" type="text" placeholder="标签（可选）">
-      <input id="devin-account-email" type="email" placeholder="邮箱">
-      <input id="devin-account-password" type="password" placeholder="密码">
-      <div class="devin-settings-actions"><button id="devin-account-add" type="button">添加账号</button></div>
-      <textarea id="devin-batch-accounts" placeholder="批量：每行 邮箱---密码---可选备注"></textarea>
-      <div class="devin-settings-actions"><button id="devin-batch-add" type="button">批量添加</button></div>
+      <textarea id="devin-batch-accounts" placeholder="每行一个账号（可填一条或多条）：邮箱---密码---可选备注"></textarea>
+      <div class="devin-settings-actions"><button id="devin-batch-add" type="button">添加账号</button></div>
     </section>
     <section class="devin-settings-section">
       <h3>余额与切号</h3>
@@ -2247,9 +2192,6 @@ function installToolbar() {
       const stored = await storageGet(["continuationTemplate"]);
       panel.querySelector("#devin-template").value = stored.continuationTemplate || DEFAULT_HANDOFF_TEMPLATE;
     }).catch((error) => setToolbarStatus(error.message, true));
-  });
-  panel.querySelector("#devin-account-add").addEventListener("click", () => {
-    addAccountFromPanel().catch((error) => setToolbarStatus(error.message, true));
   });
   panel.querySelector("#devin-batch-add").addEventListener("click", () => {
     addBatchAccountsFromPanel().catch((error) => setToolbarStatus(error.message, true));
