@@ -53,7 +53,8 @@ available.)
 folder (`%USERPROFILE%\Downloads\DevinSessionExporter`) and opens `chrome://extensions`.
 Once per profile: turn on **Developer mode** → **Load unpacked** → pick that
 folder. To update later, run `install/update-unpacked-windows.cmd` and restart
-Chrome — no need to re-add it.
+Chrome — no need to re-add it. For a silent command-line update (no Explorer, no
+browser, no prompt), run `install/update-unpacked-silent-windows.cmd`.
 
 **How updates work.** Pushing a commit to `main` with a bumped `version` in
 `manifest.json` triggers `.github/workflows/release-extension.yml`, which packs a
@@ -213,7 +214,8 @@ Chrome 企业策略（自托管、强制安装）把插件装到**本机所有 C
 `install/load-unpacked-windows.cmd` 会把最新插件下载到固定目录
 （`%USERPROFILE%\Downloads\DevinSessionExporter`，即系统「下载」目录）并打开 `chrome://extensions`。每个 profile
 点一次：打开**开发者模式** →「加载已解压」→ 选该目录。之后更新只需运行
-`install/update-unpacked-windows.cmd` 再重启 Chrome，无需重新添加。
+`install/update-unpacked-windows.cmd` 再重启 Chrome，无需重新添加。若想要纯命令行静默更新
+（不开文件夹、不开浏览器、不弹窗），运行 `install/update-unpacked-silent-windows.cmd`。
 
 **更新机制**：向 `main` 推送并把 `manifest.json` 里的 `version` 提升，会触发
 `.github/workflows/release-extension.yml`，用仓库密钥 `EXTENSION_CRX_KEY` 打包
