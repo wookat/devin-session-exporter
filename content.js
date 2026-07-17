@@ -436,10 +436,36 @@ function uniqueValues(values) {
   return [...new Set(values.filter(Boolean))];
 }
 
-function buildHandoff(data) {
+const HANDOFF_COLLAPSE_PLACEHOLDER = "[续接自前序会话；完整历史见 xu-1 上的 ~/wookat 与 CONTINUATION.md]";
+
+function collapsePriorHandoff(text) {
+  const value = String(text || "");
+  const markers = [
+    "【上一会话的上下文（用于续接）】",
+    "# Devin Context Handoff"
+  ];
+  const markerPositions = markers
+    .map((marker) => value.indexOf(marker))
+    .filter((position) => position >= 0);
+  if (!markerPositions.length) {
+    return value;
+  }
+  const markerPosition = Math.min(...markerPositions);
+  const prefix = value.slice(0, markerPosition).trimEnd();
+  return prefix
+    ? `${prefix}\n${HANDOFF_COLLAPSE_PLACEHOLDER}`
+    : HANDOFF_COLLAPSE_PLACEHOLDER;
+}
+
+function buildHandoff(data, options = {}) {
   const messages = Array.isArray(data.messages) ? data.messages : [];
   const worklog = Array.isArray(data.worklog) ? data.worklog : [];
-  const userMessages = messages.filter((message) => message.role === "user");
+  const collapsedMessages = messages.map((message) => (
+    message.role === "user"
+      ? { ...message, text: collapsePriorHandoff(message.text) }
+      : message
+  ));
+  const userMessages = collapsedMessages.filter((message) => message.role === "user");
   const devinMessages = messages.filter((message) => (
     message.role === "devin" && message.type === "devin_message"
   ));
@@ -483,6 +509,11 @@ function buildHandoff(data) {
     `Source URL: ${data.url || ""}`,
     `Exported at: ${data.exportedAt || ""}`,
     "",
+    "## Continuity",
+    "Full cross-session history lives on xu-1 at ~/wookat and CONTINUATION.md.",
+    "This handoff carries the latest session's decisions and progress as a recent delta.",
+    "A new session should read xu-1 first, then use this handoff for current context.",
+    "",
     "## Objective and evolution",
     ...(userMessages.length
       ? userMessages.map((message, index) => `${index + 1}. ${handoffSafeText(message.text)}`)
@@ -511,14 +542,18 @@ function buildHandoff(data) {
     "## Recent major actions",
     ...(majorActions.length ? majorActions.map((action) => `- ${action}`) : ["No major actions captured."]),
     "",
-    "## Full conversation",
-    "The following messages are the complete captured conversation:",
-    ""
   ];
 
-  for (const message of messages) {
-    const label = message.role === "user" ? "User" : "Devin";
-    lines.push(`### ${label}`, handoffSafeText(message.text), "");
+  if (options.includeFullConversation !== false) {
+    lines.push(
+      "## Full conversation",
+      "The following messages are the complete captured conversation:",
+      ""
+    );
+    for (const message of collapsedMessages) {
+      const label = message.role === "user" ? "User" : "Devin";
+      lines.push(`### ${label}`, handoffSafeText(message.text), "");
+    }
   }
 
   return `${lines.join("\n").trimEnd()}\n`;
