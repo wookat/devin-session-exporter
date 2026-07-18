@@ -1,154 +1,836 @@
-#devin-exporter-toolbar,#devin-exporter-settings{position:fixed;z-index:2147483647;font:13px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#e6e9ef;color-scheme:dark}
-@keyframes devin-spin{to{transform:rotate(360deg)}}
-#devin-exporter-toolbar{right:16px;bottom:16px;display:flex;gap:6px;align-items:center;max-width:calc(100vw - 32px);padding:6px;border:1px solid #262b34;border-radius:12px;background:#12161dF2}
-#devin-exporter-toolbar button,#devin-exporter-settings button{border:0;border-radius:8px;background:#222835;color:#e6e9ef;padding:7px 11px;cursor:pointer;transition:background .12s}
-#devin-exporter-toolbar button:hover,#devin-exporter-settings button:hover{background:#2d3542}
-#devin-exporter-toolbar #devin-export-handoff{background:#2f6bff;color:#fff;font-weight:600}
-#devin-exporter-toolbar #devin-export-handoff:hover{background:#4179ff}
-#devin-exporter-toolbar button:disabled{cursor:default;opacity:.55}
-#devin-exporter-toolbar button.is-loading::after,#devin-exporter-settings button.is-loading::after{content:"";display:inline-block;width:12px;height:12px;margin-left:8px;border:2px solid #ffffff66;border-top-color:#fff;border-radius:50%;vertical-align:-2px;animation:devin-spin .7s linear infinite}
-#devin-exporter-balance{padding:5px 9px;border-radius:8px;background:#1a1f28;color:#aab3c1;white-space:nowrap;font-variant-numeric:tabular-nums}
-#devin-exporter-balance.balance-negative{background:#2c1c20;color:#ff9ba3}
-#devin-exporter-balance.balance-positive{background:#16241d;color:#84dcae}
-#devin-exporter-status{max-width:220px;overflow:hidden;color:#9aa4b2;text-overflow:ellipsis;white-space:nowrap}
-#devin-exporter-status[data-error=true]{color:#ff9ba3}
-#devin-exporter-settings{right:16px;bottom:66px;width:min(440px,calc(100vw - 32px));max-height:82vh;overflow:auto;padding:12px 14px;border:1px solid #262b34;border-radius:14px;background:#12161dFA}
-#devin-exporter-settings h2{margin:0;font-size:15px;font-weight:600;color:#f2f4f8}
-#devin-exporter-settings h3{margin:0 0 6px;font-size:11px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:#8a93a3}
-#devin-exporter-settings p{margin:6px 0 10px;font-size:12px;color:#7f8896;line-height:1.5}
-.devin-settings-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
-.devin-close-x{padding:2px 9px!important;font-size:16px;line-height:1;background:transparent!important;color:#8a93a3}
-.devin-close-x:hover{color:#e6e9ef}
-.devin-icon-btn{padding:2px 8px!important;font-size:13px;background:#1e242e}
-.devin-current{padding:10px 12px;margin-bottom:12px;border:1px solid #20262f;border-radius:10px;background:#171b23}
-.devin-current-line{display:flex;align-items:center;justify-content:space-between;gap:8px}
-.devin-current-email{overflow:hidden;font-size:13px;font-weight:600;color:#e6e9ef;text-overflow:ellipsis;white-space:nowrap}
-.devin-current-meta{margin-top:2px;font-size:12px;color:#aab3c1;font-variant-numeric:tabular-nums}
-.devin-current-meta.balance-negative{color:#ff9ba3}
-.devin-current-meta.balance-positive{color:#84dcae}
-.devin-current-actions{margin-top:8px}
-.devin-current-actions button{padding:5px 11px;font-size:12px;background:#1e242e}
-.devin-field-row{display:flex;gap:8px}
-.devin-field{flex:1;display:flex;flex-direction:column;align-items:stretch;gap:3px;margin:0;font-size:11px;color:#8a93a3}
-.devin-field input{margin:0!important}
-.devin-toggle-row{display:flex;flex-wrap:wrap;gap:6px 16px;margin:10px 0 2px}
-.devin-toggle-row label{margin:0!important;font-size:12px}
-.devin-details{margin-top:10px}
-.devin-details summary{cursor:pointer;font-size:12px;color:#8a93a3;list-style:none}
-.devin-details summary:hover{color:#c1c9d6}
-.devin-details textarea{height:110px}
-#devin-exporter-settings button.devin-primary{background:#2f6bff;color:#fff;font-weight:600}
-#devin-exporter-settings button.devin-primary:hover{background:#4179ff}
-#devin-exporter-settings input[type="number"],#devin-exporter-settings input[type="search"],#devin-exporter-settings input[type="text"],#devin-exporter-settings input[type="password"],#devin-exporter-settings textarea{box-sizing:border-box;width:100%;margin:4px 0;padding:8px 10px;border:1px solid #2a303b;border-radius:8px;background:#0d1117;color:#e6e9ef;outline:none}
-#devin-exporter-settings input[type="checkbox"]{width:16px;height:16px;margin:0;flex:none;accent-color:#2f6bff}
-#devin-exporter-settings input[type="number"]:focus,#devin-exporter-settings input[type="search"]:focus,#devin-exporter-settings textarea:focus{border-color:#2f6bff}
-#devin-exporter-settings textarea{height:130px;resize:vertical}
-#devin-exporter-settings label{display:flex;gap:8px;align-items:center;margin:8px 0;font-size:13px;color:#c1c9d6}
-#devin-exporter-settings label input{width:auto;margin:0}
-.devin-settings-section{padding:12px 0;border-top:1px solid #20262f}
-.devin-settings-section:first-of-type{border-top:0}
-.devin-settings-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-#devin-exporter-settings textarea#devin-batch-accounts{height:64px}
-#devin-account-list{display:flex;flex-direction:column;border:1px solid #20262f;border-radius:10px;overflow:hidden;background:#12161d}
-.devin-account-empty{padding:14px;font-size:12px;color:#7f8896;text-align:center}
-.devin-account-batchbar{display:flex;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid #20262f;background:#171b23}
-.devin-batch-selectall{display:flex;gap:6px;align-items:center;margin:0;flex:1;font-size:12px;color:#c1c9d6}
-.devin-batch-selectall input{width:auto;margin:0}
-.devin-account-batchbar button{padding:5px 10px;font-size:12px;background:#1e242e}
-.devin-account-batchbar button:disabled{opacity:.45;cursor:default}
-.devin-account-row{display:flex;flex-direction:column;gap:5px;padding:9px 10px;border-top:1px solid #191e26}
-.devin-account-row:first-child{border-top:0}
-.devin-account-main{display:flex;gap:9px;align-items:center}
-.devin-account-select{width:auto;margin:0;flex:none}
-.devin-account-identity{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
-.devin-account-identity strong{overflow:hidden;font-size:13px;font-weight:600;color:#e6e9ef;text-overflow:ellipsis;white-space:nowrap}
-.devin-account-identity span{overflow:hidden;font-size:11px;color:#7f8896;text-overflow:ellipsis;white-space:nowrap}
-.devin-account-balance{flex:none;font-size:12px;color:#aab3c1;white-space:nowrap;font-variant-numeric:tabular-nums}
-.devin-account-balance-negative,.devin-account-balance-error{color:#ff9ba3}
-.devin-account-balance-positive{color:#84dcae}
-.devin-account-meta{display:flex;align-items:center;gap:4px;padding-left:26px;font-size:11px;color:#7f8896;white-space:nowrap}
-.devin-account-meta-label{flex:none}
-.devin-account-latest-link{flex:0 1 auto;min-width:0;overflow:hidden;color:#8ab4ff;cursor:pointer;text-decoration:none;text-overflow:ellipsis;white-space:nowrap}
-.devin-account-latest-link:hover{text-decoration:underline}
-.devin-account-status{flex:none;color:#aab3c1}
-.devin-account-actions{display:flex;flex-wrap:wrap;gap:5px;padding-left:26px}
-.devin-account-actions button{padding:4px 9px;font-size:12px;background:#1e242e}
-.devin-account-actions button.devin-account-switch{background:#264b8a;color:#dce7ff;font-weight:600}
-.devin-account-sessions{margin-top:4px;padding:8px;border-radius:8px;background:#0d1117}
-.devin-session-filter{margin:0 0 7px}
-.devin-session-list{display:flex;flex-direction:column;gap:4px;max-height:230px;overflow:auto}
-.devin-session-row{display:flex;gap:6px;align-items:center;padding:4px 2px}
-.devin-session-title{flex:1;min-width:0;overflow:hidden;font-size:12px;color:#c1c9d6;text-overflow:ellipsis;white-space:nowrap}
-.devin-session-row button{padding:3px 8px;font-size:11px;white-space:nowrap;background:#1e242e}
-.devin-session-empty{padding:4px 2px;font-size:12px;color:#7f8896}
-.devin-update-notice{margin-bottom:10px;padding:8px 10px;font-size:12px;color:#ffd479;border:1px solid #4a3d1e;border-radius:8px;background:#26200f}
-.devin-account-archived{opacity:.6}
-.devin-account-badge{flex:none;align-self:flex-start;padding:0 6px;font-size:10px;color:#c1c9d6;border:1px solid #333b47;border-radius:8px;background:#1e242e}
-.devin-snippet-row{display:flex;gap:6px;align-items:center;padding:5px 0;border-top:1px solid #191e26}
-.devin-snippet-row:first-child{border-top:0}
-.devin-snippet-title{flex:1;min-width:0;overflow:hidden;font-size:12px;color:#c1c9d6;text-overflow:ellipsis;white-space:nowrap}
-.devin-snippet-row button{padding:4px 9px;font-size:12px;background:#1e242e}
-#devin-snippet-text{height:64px}
+#devin-exporter-toolbar,
+#devin-exporter-settings {
+  --devin-accent: #6d8dff;
+  --devin-accent-strong: #5278f5;
+  --devin-surface-0: #10141b;
+  --devin-surface-1: #151b24;
+  --devin-surface-2: #1b2430;
+  --devin-surface-3: #222d3a;
+  --devin-border: #2a3543;
+  --devin-border-subtle: #202a35;
+  --devin-text: #edf1f7;
+  --devin-text-secondary: #b5c0cf;
+  --devin-text-muted: #7f8b9c;
+  --devin-danger: #ff8996;
+  --devin-positive: #82d9aa;
+  --devin-warning: #f2c86b;
+  --devin-space-1: 4px;
+  --devin-space-2: 8px;
+  --devin-space-3: 12px;
+  --devin-space-4: 16px;
+  --devin-radius-sm: 5px;
+  --devin-radius-md: 8px;
+  --devin-radius-lg: 11px;
+  --devin-control-height: 28px;
+  --devin-transition: 140ms ease;
+  position: fixed;
+  z-index: 2147483647;
+  box-sizing: border-box;
+  color: var(--devin-text);
+  color-scheme: dark;
+  font: 12px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
 
-#devin-exporter-toolbar,#devin-exporter-settings{font-size:12px}
-#devin-exporter-toolbar{right:12px;bottom:12px;gap:4px;padding:4px;border-radius:7px}
-#devin-exporter-toolbar button,#devin-exporter-settings button{border:1px solid #2a303b;border-radius:4px;padding:5px 8px;font-size:12px;line-height:1.2}
-#devin-exporter-toolbar button:hover,#devin-exporter-settings button:hover{background:#252c37}
-#devin-exporter-toolbar button.is-loading::after,#devin-exporter-settings button.is-loading::after{width:10px;height:10px;margin-left:5px;border-width:1px}
-#devin-exporter-balance{padding:4px 7px;border-radius:4px}
-#devin-exporter-status{max-width:200px}
-#devin-exporter-settings{right:12px;bottom:56px;width:min(420px,calc(100vw - 24px));max-height:84vh;padding:9px 10px;border-radius:8px;box-shadow:none}
-#devin-exporter-settings h2{font-size:14px}
-#devin-exporter-settings h3{margin-bottom:4px;font-size:10px}
-#devin-exporter-settings p{margin:4px 0 7px;font-size:11px;line-height:1.35}
-.devin-settings-header{margin-bottom:7px}
-.devin-close-x{padding:1px 6px!important;font-size:15px;line-height:1}
-.devin-icon-btn{padding:2px 6px!important;font-size:13px}
-.devin-current{padding:7px 9px;margin-bottom:8px;border-radius:6px}
-.devin-current-line{gap:6px}
-.devin-current-email{font-size:12px}
-.devin-current-meta{font-size:11px}
-.devin-current-actions{margin-top:5px}
-.devin-current-actions button{padding:4px 8px;font-size:11px}
-.devin-field-row{gap:6px}
-.devin-field{gap:2px;font-size:10px}
-.devin-toggle-row{gap:4px 12px;margin:7px 0 1px}
-.devin-toggle-row label{font-size:11px}
-.devin-details{margin-top:7px}
-.devin-details summary{font-size:11px}
-.devin-details textarea{height:90px}
-#devin-exporter-settings input[type="number"],#devin-exporter-settings input[type="search"],#devin-exporter-settings input[type="text"],#devin-exporter-settings input[type="password"],#devin-exporter-settings textarea{margin:2px 0;padding:6px 7px;border-radius:4px;font-size:12px}
-#devin-exporter-settings input[type="checkbox"]{width:14px;height:14px}
-#devin-exporter-settings textarea{height:108px}
-#devin-exporter-settings label{gap:5px;margin:5px 0;font-size:12px}
-.devin-settings-section{padding:8px 0}
-.devin-settings-actions{gap:4px;margin-top:5px}
-#devin-exporter-settings textarea#devin-batch-accounts{height:56px}
-#devin-account-list{border-radius:6px}
-.devin-account-empty{padding:10px;font-size:11px}
-.devin-account-batchbar{gap:6px;padding:5px 7px}
-.devin-batch-selectall{gap:5px;font-size:11px}
-.devin-account-batchbar button{padding:4px 7px;font-size:11px}
-.devin-account-row{gap:3px;padding:7px 8px}
-.devin-account-main{gap:6px}
-.devin-account-identity{gap:0}
-.devin-account-identity strong{font-size:12px}
-.devin-account-identity span{font-size:10px}
-.devin-account-balance{font-size:11px}
-.devin-account-meta{gap:3px;padding-left:22px;font-size:10px}
-.devin-account-actions{flex-wrap:nowrap;gap:3px;padding-left:22px;white-space:nowrap}
-.devin-account-actions button{flex:none;padding:3px 7px;font-size:11px}
-.devin-account-actions button.devin-account-action-icon{display:inline-flex;width:23px;height:22px;align-items:center;justify-content:center;padding:0;font-size:13px;line-height:1}
-.devin-account-sessions{margin-top:3px;padding:6px;border-radius:5px}
-.devin-session-filter{margin-bottom:5px}
-.devin-session-list{gap:2px;max-height:210px}
-.devin-session-row{gap:4px;padding:3px 2px}
-.devin-session-title{font-size:11px}
-.devin-session-row button{padding:3px 6px;font-size:10px}
-.devin-session-empty{padding:3px 2px;font-size:11px}
-.devin-update-notice{margin-bottom:7px;padding:6px 8px;font-size:11px;border-radius:5px}
-.devin-account-badge{padding:0 4px;font-size:9px;border-radius:6px}
-.devin-snippet-row{gap:4px;padding:4px 0}
-.devin-snippet-title{font-size:11px}
-.devin-snippet-row button{padding:3px 7px;font-size:11px}
-#devin-snippet-text{height:56px}
+@keyframes devin-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+#devin-exporter-toolbar {
+  right: var(--devin-space-3);
+  bottom: var(--devin-space-3);
+  display: flex;
+  align-items: center;
+  gap: var(--devin-space-1);
+  max-width: calc(100vw - 24px);
+  padding: var(--devin-space-1);
+  border: 1px solid var(--devin-border);
+  border-radius: var(--devin-radius-md);
+  background: rgb(16 20 27 / 94%);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 20%);
+}
+
+#devin-exporter-settings {
+  right: var(--devin-space-3);
+  bottom: 58px;
+  width: min(430px, calc(100vw - 24px));
+  max-height: 84vh;
+  overflow: auto;
+  padding: var(--devin-space-3);
+  border: 1px solid var(--devin-border);
+  border-radius: var(--devin-radius-lg);
+  background: rgb(16 20 27 / 98%);
+  box-shadow: 0 16px 40px rgb(0 0 0 / 34%);
+  scrollbar-color: var(--devin-border) transparent;
+  scrollbar-width: thin;
+}
+
+#devin-exporter-settings::-webkit-scrollbar,
+.devin-session-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+#devin-exporter-settings::-webkit-scrollbar-track,
+.devin-session-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#devin-exporter-settings::-webkit-scrollbar-thumb,
+.devin-session-list::-webkit-scrollbar-thumb {
+  border-radius: 99px;
+  background: var(--devin-border);
+}
+
+#devin-exporter-settings button,
+#devin-exporter-toolbar button {
+  box-sizing: border-box;
+  min-height: var(--devin-control-height);
+  border: 1px solid var(--devin-border);
+  border-radius: var(--devin-radius-sm);
+  background: var(--devin-surface-2);
+  color: var(--devin-text);
+  padding: 0 var(--devin-space-2);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    border-color var(--devin-transition),
+    background var(--devin-transition),
+    color var(--devin-transition),
+    transform var(--devin-transition);
+}
+
+#devin-exporter-settings button:hover,
+#devin-exporter-toolbar button:hover {
+  border-color: #3d4d61;
+  background: var(--devin-surface-3);
+}
+
+#devin-exporter-settings button:active,
+#devin-exporter-toolbar button:active {
+  transform: translateY(1px);
+}
+
+#devin-exporter-settings button:focus-visible,
+#devin-exporter-toolbar button:focus-visible,
+#devin-exporter-settings input:focus-visible,
+#devin-exporter-settings textarea:focus-visible,
+#devin-exporter-settings summary:focus-visible,
+.devin-account-latest-link:focus-visible {
+  outline: 2px solid var(--devin-accent);
+  outline-offset: 2px;
+}
+
+#devin-exporter-settings button:disabled,
+#devin-exporter-toolbar button:disabled {
+  cursor: default;
+  opacity: .48;
+  transform: none;
+}
+
+#devin-exporter-toolbar #devin-export-handoff,
+#devin-exporter-settings button.devin-primary {
+  border-color: var(--devin-accent);
+  background: var(--devin-accent-strong);
+  color: #fff;
+  font-weight: 650;
+}
+
+#devin-exporter-toolbar #devin-export-handoff:hover,
+#devin-exporter-settings button.devin-primary:hover {
+  border-color: #86a0ff;
+  background: var(--devin-accent);
+}
+
+#devin-exporter-toolbar button.is-loading::after,
+#devin-exporter-settings button.is-loading::after {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-left: var(--devin-space-1);
+  border: 1px solid rgb(255 255 255 / 40%);
+  border-top-color: #fff;
+  border-radius: 50%;
+  vertical-align: -1px;
+  animation: devin-spin .7s linear infinite;
+}
+
+#devin-exporter-balance {
+  padding: 0 var(--devin-space-2);
+  color: var(--devin-text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+#devin-exporter-balance.balance-negative,
+.devin-current-balance-pill.balance-negative,
+.devin-account-balance-negative,
+.devin-account-balance-error {
+  color: var(--devin-danger);
+}
+
+#devin-exporter-balance.balance-positive,
+.devin-current-balance-pill.balance-positive,
+.devin-account-balance-positive {
+  color: var(--devin-positive);
+}
+
+#devin-exporter-status {
+  max-width: 210px;
+  overflow: hidden;
+  color: var(--devin-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#devin-exporter-status[data-error=true] {
+  color: var(--devin-danger);
+}
+
+.devin-settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: calc(var(--devin-space-1) * -1) 0 var(--devin-space-3);
+  padding-bottom: var(--devin-space-2);
+  border-bottom: 1px solid var(--devin-border-subtle);
+}
+
+#devin-exporter-settings h2 {
+  margin: 0;
+  color: var(--devin-text);
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -.01em;
+}
+
+#devin-exporter-settings h3 {
+  margin: 0 0 var(--devin-space-2);
+  color: var(--devin-text-secondary);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+#devin-exporter-settings p {
+  margin: var(--devin-space-1) 0 var(--devin-space-2);
+  color: var(--devin-text-muted);
+  font-size: 11px;
+}
+
+.devin-close-x {
+  min-width: var(--devin-control-height);
+  padding: 0!important;
+  border-color: transparent!important;
+  background: transparent!important;
+  color: var(--devin-text-muted)!important;
+  font-size: 18px!important;
+}
+
+.devin-close-x:hover {
+  border-color: var(--devin-border)!important;
+  background: var(--devin-surface-2)!important;
+  color: var(--devin-text)!important;
+}
+
+.devin-current {
+  display: grid;
+  gap: var(--devin-space-2);
+  margin-bottom: var(--devin-space-3);
+  padding: var(--devin-space-3);
+  border: 1px solid var(--devin-border);
+  border-radius: var(--devin-radius-md);
+  background: linear-gradient(135deg, var(--devin-surface-1), #18202c);
+}
+
+.devin-current-line {
+  display: flex;
+  align-items: center;
+  gap: var(--devin-space-2);
+}
+
+.devin-current-email {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--devin-text);
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.devin-current-meta {
+  min-width: 0;
+}
+
+.devin-current-balance-pill {
+  display: inline-flex;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 3px var(--devin-space-2);
+  border: 1px solid var(--devin-border-subtle);
+  border-radius: 99px;
+  background: var(--devin-surface-0);
+  color: var(--devin-text-secondary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.devin-current-balance-pill.balance-negative {
+  border-color: rgb(255 137 150 / 30%);
+  background: rgb(110 35 48 / 25%);
+}
+
+.devin-current-balance-pill.balance-positive {
+  border-color: rgb(130 217 170 / 28%);
+  background: rgb(29 91 62 / 24%);
+}
+
+.devin-current-actions {
+  display: flex;
+}
+
+.devin-current-actions button {
+  background: var(--devin-surface-2);
+  font-size: 11px;
+}
+
+.devin-icon-btn {
+  width: var(--devin-control-height);
+  min-width: var(--devin-control-height);
+  padding: 0!important;
+  color: var(--devin-text-secondary)!important;
+  font-size: 14px!important;
+}
+
+.devin-field-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--devin-space-2);
+}
+
+.devin-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--devin-space-1);
+  margin: 0;
+  color: var(--devin-text-muted);
+  font-size: 10px;
+}
+
+.devin-field input {
+  margin: 0!important;
+}
+
+.devin-toggle-row {
+  display: grid;
+  gap: var(--devin-space-1);
+  margin: var(--devin-space-3) 0 var(--devin-space-2);
+}
+
+#devin-exporter-settings label.devin-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--devin-space-2);
+  min-height: 24px;
+  margin: 0;
+  padding: 0 var(--devin-space-1);
+  border-radius: var(--devin-radius-sm);
+  color: var(--devin-text-secondary);
+  font-size: 11px;
+  transition: background var(--devin-transition);
+}
+
+#devin-exporter-settings label.devin-toggle:hover {
+  background: var(--devin-surface-1);
+}
+
+#devin-exporter-settings label.devin-toggle input {
+  position: relative;
+  width: 28px;
+  height: 16px;
+  margin: 0;
+  appearance: none;
+  border: 1px solid var(--devin-border);
+  border-radius: 99px;
+  background: var(--devin-surface-0);
+  cursor: pointer;
+  transition: border-color var(--devin-transition), background var(--devin-transition);
+}
+
+#devin-exporter-settings label.devin-toggle input::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--devin-text-muted);
+  transition: transform var(--devin-transition), background var(--devin-transition);
+}
+
+#devin-exporter-settings label.devin-toggle input:checked {
+  border-color: var(--devin-accent);
+  background: var(--devin-accent-strong);
+}
+
+#devin-exporter-settings label.devin-toggle input:checked::after {
+  transform: translateX(12px);
+  background: #fff;
+}
+
+.devin-details {
+  margin-top: var(--devin-space-3);
+  border-top: 1px solid var(--devin-border-subtle);
+}
+
+.devin-details summary {
+  padding: var(--devin-space-2) 0;
+  cursor: pointer;
+  color: var(--devin-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  list-style: none;
+}
+
+.devin-details summary::before {
+  display: inline-block;
+  width: 16px;
+  color: var(--devin-text-muted);
+  content: "›";
+  font-size: 15px;
+  transition: transform var(--devin-transition);
+}
+
+.devin-details[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.devin-details summary:hover {
+  color: var(--devin-text);
+}
+
+.devin-details textarea {
+  height: 90px;
+}
+
+#devin-exporter-settings input[type="number"],
+#devin-exporter-settings input[type="search"],
+#devin-exporter-settings input[type="text"],
+#devin-exporter-settings input[type="password"],
+#devin-exporter-settings textarea {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  padding: 5px var(--devin-space-2);
+  border: 1px solid var(--devin-border);
+  border-radius: var(--devin-radius-sm);
+  outline: none;
+  background: var(--devin-surface-0);
+  color: var(--devin-text);
+  font: inherit;
+  transition: border-color var(--devin-transition), background var(--devin-transition);
+}
+
+#devin-exporter-settings input[type="number"]:hover,
+#devin-exporter-settings input[type="search"]:hover,
+#devin-exporter-settings input[type="text"]:hover,
+#devin-exporter-settings input[type="password"]:hover,
+#devin-exporter-settings textarea:hover {
+  border-color: #3d4d61;
+}
+
+#devin-exporter-settings input[type="number"]:focus,
+#devin-exporter-settings input[type="search"]:focus,
+#devin-exporter-settings input[type="text"]:focus,
+#devin-exporter-settings input[type="password"]:focus,
+#devin-exporter-settings textarea:focus {
+  border-color: var(--devin-accent);
+  background: #121923;
+}
+
+#devin-exporter-settings textarea {
+  min-height: 64px;
+  resize: vertical;
+}
+
+#devin-exporter-settings label:not(.devin-field):not(.devin-toggle) {
+  display: flex;
+  align-items: center;
+  gap: var(--devin-space-2);
+  margin: var(--devin-space-2) 0;
+  color: var(--devin-text-secondary);
+  font-size: 11px;
+}
+
+#devin-exporter-settings input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--devin-accent);
+}
+
+.devin-settings-section {
+  padding: var(--devin-space-3) 0;
+  border-top: 1px solid var(--devin-border-subtle);
+}
+
+.devin-settings-section:first-of-type {
+  border-top: 0;
+}
+
+.devin-settings-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--devin-space-2);
+  margin-top: var(--devin-space-2);
+}
+
+.devin-settings-actions button:first-child:not(.devin-primary) {
+  color: var(--devin-text-secondary);
+}
+
+#devin-exporter-settings textarea#devin-batch-accounts {
+  min-height: 56px;
+}
+
+#devin-account-list {
+  overflow: visible;
+  border: 1px solid var(--devin-border);
+  border-radius: var(--devin-radius-md);
+  background: var(--devin-surface-0);
+}
+
+.devin-account-empty {
+  padding: var(--devin-space-4) var(--devin-space-3);
+  color: var(--devin-text-muted);
+  font-size: 11px;
+  text-align: center;
+}
+
+.devin-account-batchbar {
+  display: flex;
+  align-items: center;
+  gap: var(--devin-space-2);
+  padding: var(--devin-space-2);
+  border-bottom: 1px solid var(--devin-border-subtle);
+  background: var(--devin-surface-1);
+}
+
+.devin-batch-selectall {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--devin-space-1);
+  min-width: 0;
+  margin: 0!important;
+  color: var(--devin-text-secondary)!important;
+  font-size: 11px!important;
+}
+
+.devin-batch-selectall input {
+  width: auto!important;
+  margin: 0!important;
+}
+
+.devin-account-batchbar button {
+  min-height: 24px!important;
+  padding: 0 var(--devin-space-2)!important;
+  font-size: 10px!important;
+}
+
+.devin-account-row {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--devin-space-1);
+  padding: var(--devin-space-2);
+  border-top: 1px solid var(--devin-border-subtle);
+}
+
+.devin-account-row:first-child {
+  border-top: 0;
+}
+
+.devin-account-main {
+  display: flex;
+  align-items: center;
+  gap: var(--devin-space-2);
+  min-width: 0;
+}
+
+.devin-account-select {
+  width: auto;
+  margin: 0;
+  flex: none;
+}
+
+.devin-account-identity {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.devin-account-identity strong {
+  overflow: hidden;
+  color: var(--devin-text);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.devin-account-identity span {
+  overflow: hidden;
+  color: var(--devin-text-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.devin-account-balance {
+  flex: none;
+  color: var(--devin-text-secondary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.devin-account-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--devin-space-1);
+  min-width: 0;
+  padding-left: 22px;
+  color: var(--devin-text-muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.devin-account-meta-label,
+.devin-account-status {
+  flex: none;
+}
+
+.devin-account-latest-link {
+  min-width: 0;
+  overflow: hidden;
+  flex: 0 1 auto;
+  color: #91b5ff;
+  cursor: pointer;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.devin-account-latest-link:hover {
+  color: #b3caff;
+  text-decoration: underline;
+}
+
+.devin-account-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--devin-space-1);
+  min-width: 0;
+  padding-left: 22px;
+  white-space: nowrap;
+}
+
+.devin-account-actions button {
+  flex: none;
+  min-height: 24px!important;
+  padding: 0 var(--devin-space-2)!important;
+  font-size: 11px!important;
+}
+
+.devin-account-actions button.devin-account-switch {
+  border-color: #456bc7;
+  background: #294b91;
+  color: #e5edff;
+  font-weight: 650;
+}
+
+.devin-account-actions button.devin-account-switch:hover {
+  border-color: #7294ed;
+  background: #345db0;
+}
+
+.devin-account-actions button.devin-account-action-icon {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  padding: 0!important;
+  color: var(--devin-text-secondary);
+  font-size: 13px!important;
+}
+
+.devin-account-more {
+  color: var(--devin-text-muted)!important;
+  font-size: 16px!important;
+}
+
+.devin-account-overflow {
+  position: relative;
+  flex: none;
+}
+
+.devin-account-menu {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + var(--devin-space-1));
+  right: 0;
+  display: grid;
+  min-width: 132px;
+  padding: var(--devin-space-1);
+  border: 1px solid var(--devin-border);
+  border-radius: var(--devin-radius-sm);
+  background: var(--devin-surface-2);
+  box-shadow: 0 10px 24px rgb(0 0 0 / 34%);
+}
+
+.devin-account-menu button {
+  display: flex;
+  align-items: center;
+  gap: var(--devin-space-2);
+  width: 100%;
+  min-height: 26px!important;
+  justify-content: flex-start;
+  border-color: transparent!important;
+  background: transparent!important;
+  color: var(--devin-text-secondary);
+  font-size: 11px!important;
+  text-align: left;
+}
+
+.devin-account-menu button:hover {
+  border-color: var(--devin-border)!important;
+  background: var(--devin-surface-3)!important;
+  color: var(--devin-text);
+}
+
+.devin-account-menu button span {
+  width: 16px;
+  color: var(--devin-text-muted);
+  text-align: center;
+}
+
+.devin-account-sessions {
+  margin: var(--devin-space-1) 0 0 22px;
+  padding: var(--devin-space-2);
+  border: 1px solid var(--devin-border-subtle);
+  border-radius: var(--devin-radius-sm);
+  background: var(--devin-surface-0);
+}
+
+.devin-session-filter {
+  margin: 0 0 var(--devin-space-2)!important;
+}
+
+.devin-session-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--devin-space-1);
+  max-height: 210px;
+  overflow: auto;
+  scrollbar-color: var(--devin-border) transparent;
+  scrollbar-width: thin;
+}
+
+.devin-session-row {
+  display: flex;
+  align-items: center;
+  gap: var(--devin-space-1);
+  padding: var(--devin-space-1) 0;
+}
+
+.devin-session-title {
+  min-width: 0;
+  overflow: hidden;
+  flex: 1;
+  color: var(--devin-text-secondary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.devin-session-row button {
+  min-height: 24px!important;
+  padding: 0 var(--devin-space-2)!important;
+  font-size: 10px!important;
+  white-space: nowrap;
+}
+
+.devin-session-empty {
+  padding: var(--devin-space-2) 0;
+  color: var(--devin-text-muted);
+  font-size: 11px;
+}
+
+.devin-update-notice {
+  margin-bottom: var(--devin-space-3);
+  padding: var(--devin-space-2);
+  border: 1px solid #6a5220;
+  border-radius: var(--devin-radius-sm);
+  background: rgb(93 67 18 / 24%);
+  color: var(--devin-warning);
+  font-size: 11px;
+}
+
+.devin-account-archived {
+  opacity: .62;
+}
+
+.devin-account-badge {
+  align-self: flex-start;
+  padding: 1px var(--devin-space-1);
+  border: 1px solid var(--devin-border);
+  border-radius: 99px;
+  background: var(--devin-surface-2);
+  color: var(--devin-text-muted);
+  font-size: 9px;
+}
+
+.devin-snippet-row {
+  display: flex;
+  align-items: center;
+  gap: var(--devin-space-1);
+  padding: var(--devin-space-2) 0;
+  border-top: 1px solid var(--devin-border-subtle);
+}
+
+.devin-snippet-row:first-child {
+  border-top: 0;
+}
+
+.devin-snippet-title {
+  min-width: 0;
+  overflow: hidden;
+  flex: 1;
+  color: var(--devin-text-secondary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.devin-snippet-row button {
+  min-height: 24px!important;
+  padding: 0 var(--devin-space-2)!important;
+  font-size: 11px!important;
+}
+
+#devin-snippet-text {
+  min-height: 56px;
+}
