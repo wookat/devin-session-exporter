@@ -48,6 +48,28 @@ function Toolbar({ onToggleSettings }) {
     }
   }, []);
 
+  const copyContinuation = useCallback(async () => {
+    setBusy(true);
+    try {
+      await core.copyContinuationToClipboard();
+    } catch (error) {
+      reportError(error);
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const continueFromClipboard = useCallback(async () => {
+    setBusy(true);
+    try {
+      await core.continueFromClipboard();
+    } catch (error) {
+      reportError(error);
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
   return (
     <div id="devin-exporter-toolbar">
       <button
@@ -58,6 +80,24 @@ function Toolbar({ onToggleSettings }) {
         onClick={exportHandoff}
       >
         导出 Handoff
+      </button>
+      <button
+        id="devin-copy-continuation"
+        type="button"
+        className={busy ? "is-loading" : ""}
+        disabled={!onSession || busy}
+        onClick={copyContinuation}
+      >
+        复制续接内容
+      </button>
+      <button
+        id="devin-continue-from-clipboard"
+        type="button"
+        className={busy ? "is-loading" : ""}
+        disabled={busy}
+        onClick={continueFromClipboard}
+      >
+        从剪贴板续接
       </button>
       <button id="devin-settings-button" type="button" onClick={onToggleSettings}>
         设置

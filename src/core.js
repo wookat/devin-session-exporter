@@ -1767,6 +1767,50 @@ async function createContinuationSession(state) {
   setToolbarStatus(shouldSend ? `${switched}，并已发送续接提示` : `${switched}，已填入续接提示`);
 }
 
+async function waitForComposerAfterOnboarding(timeout = 30000, interval = 800) {
+  return waitForElement(() => {
+    const composer = findComposer();
+    if (!composer) advanceOnboarding();
+    return composer;
+  }, timeout, interval);
+}
+
+async function continueFromClipboard() {
+  let text = "";
+  try {
+    text = await navigator.clipboard.readText();
+  } catch {
+    setToolbarStatus("无法读取剪贴板，请手动粘贴到输入框", true);
+    return false;
+  }
+  if (!text.trim()) {
+    setToolbarStatus("剪贴板为空，未执行续接", true);
+    return false;
+  }
+  setToolbarStatus("正在等待 Devin 输入框...");
+  const composer = await waitForComposerAfterOnboarding();
+  if (!composer) {
+    setToolbarStatus("未找到 Devin 输入框，请手动打开首页后重试", true);
+    return false;
+  }
+  try {
+    injectComposerText(text);
+    const sendButton = await waitForElement(() => {
+      const button = document.querySelector("button[aria-label='Send']");
+      return button && !button.disabled ? button : null;
+    }, 5000);
+    if (!sendButton || !clickSendButton()) {
+      setToolbarStatus("续接内容已填入，但找不到可用的 Send 按钮", true);
+      return false;
+    }
+    setToolbarStatus("已发送剪贴板续接内容");
+    return true;
+  } catch (error) {
+    setToolbarStatus(error.message || "从剪贴板续接失败", true);
+    return false;
+  }
+}
+
 async function exportHandoffForSwitch(options = {}) {
   const data = await extractConversation({
     includeConversation: true,
@@ -2636,6 +2680,27 @@ async function exportHandoff() {
   return result;
 }
 
+async function copyContinuationToClipboard() {
+  if (!isSessionPage()) {
+    setToolbarStatus("请先打开 Devin 会话页面", true);
+    return false;
+  }
+  try {
+    const { compact } = await exportHandoff();
+    const stored = await storageGet(["continuationTemplate"]);
+    const text = buildContinuationText(
+      stored.continuationTemplate || DEFAULT_HANDOFF_TEMPLATE,
+      compact
+    );
+    const ok = await copyToClipboard(text);
+    setToolbarStatus(ok ? "已复制续接内容" : "复制失败，请手动复制", !ok);
+    return ok;
+  } catch (error) {
+    setToolbarStatus(error.message || "复制续接内容失败", true);
+    return false;
+  }
+}
+
 const UPDATE_CHECK_KEY = "lastUpdateCheck";
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const LATEST_RELEASE_API = "https://api.github.com/repos/wookat/devin-session-exporter/releases/latest";
@@ -2896,6 +2961,8 @@ export {
   // Data / lifecycle actions.
   extractConversation,
   exportHandoff,
+  copyContinuationToClipboard,
+  continueFromClipboard,
   exportSessionHandoff,
   refreshBalanceDisplay,
   refreshCurrentAccount,
