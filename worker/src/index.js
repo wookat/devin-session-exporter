@@ -486,7 +486,14 @@ function renderPullRequests(metadata) {
 function buildTldr(metadata, events, messages) {
   const lines = ["## TL;DR（AI 先读这里）", ""];
   const goal = messages.find((message) => message.role === "User");
-  if (goal) lines.push(`- **目标**：${firstLine(goal.text, 300)}`);
+  if (goal) {
+    const attachments = (goal.text.match(ATTACHMENT_MARKER_RE) || [])
+      .map((marker) => attachmentName(parseAttachmentMarker(marker).url))
+      .filter(Boolean);
+    const goalText = firstLine(goal.text.replace(ATTACHMENT_MARKER_RE, " "), 300)
+      || (attachments.length ? `（首条消息为附件：${attachments.join("、")}）` : "");
+    if (goalText) lines.push(`- **目标**：${goalText}`);
+  }
   const status = String(metadata?.status_enum || metadata?.status || "").trim();
   if (status) lines.push(`- **会话状态**：${status}`);
   const latestTodos = sortedByTime(events).reverse()

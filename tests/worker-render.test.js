@@ -32,6 +32,19 @@ test("renderMarkdown puts an AI-first TL;DR at the top", async () => {
   assert.match(md, /> 代码已完成，准备部署。/);
 });
 
+test("TL;DR goal strips attachment markers", async () => {
+  const events = [
+    { type: "initial_user_message", message: 'ATTACHMENT:"https://app.devin.ai/attachments/u1/handoff.md"\n请续接任务', created_at_ms: T0 }
+  ];
+  const md = await renderMarkdown({ title: "T" }, events, null);
+  assert.match(md, /- \*\*目标\*\*：请续接任务/);
+  const onlyAttachment = [
+    { type: "initial_user_message", message: 'ATTACHMENT:"https://app.devin.ai/attachments/u1/handoff.md"', created_at_ms: T0 }
+  ];
+  const md2 = await renderMarkdown({ title: "T" }, onlyAttachment, null);
+  assert.match(md2, /- \*\*目标\*\*：（首条消息为附件：handoff.md）/);
+});
+
 test("renderMarkdown timestamps conversation and marks interrupted commands", async () => {
   const md = await renderMarkdown({ title: "T" }, sampleEvents(), null);
   assert.match(md, /### \[07-18 10:00\] User/);
