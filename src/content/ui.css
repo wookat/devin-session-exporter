@@ -72,7 +72,7 @@
 
 #devin-exporter-toolbar {
   right: var(--devin-space-3);
-  bottom: var(--devin-space-3);
+  top: 52px;
   display: flex;
   align-items: center;
   gap: var(--devin-space-1);
@@ -86,9 +86,9 @@
 
 #devin-exporter-settings {
   right: var(--devin-space-3);
-  bottom: 58px;
+  top: 96px;
   width: min(430px, calc(100vw - 24px));
-  max-height: 84vh;
+  max-height: calc(100vh - 110px);
   overflow: auto;
   padding: var(--devin-space-3);
   border: 1px solid var(--devin-border);
