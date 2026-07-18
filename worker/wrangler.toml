@@ -1,0 +1,10 @@
+name = "devin-session-share"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+[[kv_namespaces]]
+binding = "SHARES"
+id = "9d01e1791dbd4594bc2603e7cee5ccde"
+
+[vars]
+SHARE_TTL_SECONDS = "86400"

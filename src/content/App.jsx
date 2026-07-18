@@ -197,6 +197,12 @@ function AccountSessions({ account, sessionKey }) {
               >
                 导出Handoff
               </button>
+              <button
+                type="button"
+                onClick={() => core.shareSession(session, state.auth).catch(reportError)}
+              >
+                生成分享链接
+              </button>
             </div>
           ))
         )}
@@ -645,6 +651,15 @@ function SettingsPanel({ onClose }) {
             />
           </label>
         </div>
+        <label className="devin-field">
+          分享服务地址（Worker URL）
+          <input
+            type="url"
+            placeholder="https://your-worker.example.workers.dev"
+            value={settings.shareServiceUrl}
+            onChange={(event) => patch("shareServiceUrl", event.target.value)}
+          />
+        </label>
         <div className="devin-toggle-row">
           <label className="devin-toggle">
             <input
