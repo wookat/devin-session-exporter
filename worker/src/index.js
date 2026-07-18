@@ -307,9 +307,12 @@ async function fetchAttachmentText(relativePath, cookie) {
 // Rewrites attachment references so a reader without the owner account can still
 // read them: text files are inlined, images/binaries become links proxied through
 // this Worker (which re-authenticates upstream with the shared account token).
-async function rewriteAttachments(value, ctx) {
+// Inlined text is itself rewritten (depth-bounded) so attachment markers embedded
+// inside a handoff document are also converted instead of left as 401 URLs.
+async function rewriteAttachments(value, ctx, depth = 0) {
   let text = String(value || "");
   if (!text) return text;
+  const inlineText = depth < 1;
   const seen = new Map();
   const collect = (rawUrl, fileSize) => {
     const relativePath = attachmentRelativePath(rawUrl);
@@ -332,11 +335,11 @@ async function rewriteAttachments(value, ctx) {
     const name = attachmentName(relativePath);
     const proxied = proxiedAttachmentUrl(ctx.workerOrigin, ctx.shareId, relativePath);
     let rendered;
-    if (TEXT_ATTACHMENT_EXT.test(name)
+    if (inlineText && TEXT_ATTACHMENT_EXT.test(name)
       && (!Number.isFinite(info.fileSize) || info.fileSize <= MAX_INLINE_ATTACHMENT_BYTES)) {
       const content = await fetchAttachmentText(relativePath, await ctx.cookie());
       rendered = content != null
-        ? `\n\n<附件 ${name}>\n${content.trim()}\n</附件 ${name}>\n`
+        ? `\n\n<附件 ${name}>\n${(await rewriteAttachments(content, ctx, depth + 1)).trim()}\n</附件 ${name}>\n`
         : `[附件 ${name}](${proxied})`;
     } else if (IMAGE_ATTACHMENT_EXT.test(name)) {
       rendered = `![${name}](${proxied})`;

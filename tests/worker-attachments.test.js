@@ -79,6 +79,26 @@ test("rewriteAttachments falls back to a proxied link when text fetch fails", as
   }
 });
 
+test("rewriteAttachments rewrites attachments embedded inside an inlined doc", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    text: async () => `handoff body\nATTACHMENT:{"url":"${IMG}","fileSize":700000}`
+  });
+  try {
+    const out = await rewriteAttachments(`ATTACHMENT:{"url":"${DOC}","fileSize":20}`, ctx());
+    assert.match(out, /<附件 note\.md>/);
+    assert.match(
+      out,
+      new RegExp(`!\\[image\\.png\\]\\(${ORIGIN}/a/${SHARE}/76d27d7a-80dd-4ae0-8fd8-a037e131d927/image\\.png\\)`)
+    );
+    assert.ok(!out.includes("ATTACHMENT:"), "nested marker must be converted");
+    assert.ok(!out.includes("app.devin.ai/attachments"), "nested private URL must be replaced");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
 test("rewriteAttachments leaves text without attachments untouched", async () => {
   const out = await rewriteAttachments("just a normal message", ctx());
   assert.strictEqual(out, "just a normal message");
