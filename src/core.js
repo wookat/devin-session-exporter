@@ -2466,14 +2466,14 @@ async function shareSession(session, auth) {
     return "";
   }
   setToolbarStatus(`正在生成分享链接：${session.title}…`);
-  const content = await exportListedSessionHandoff(session, auth, { includeFullConversation: true });
   const response = await fetch(`${serviceUrl}/share`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     credentials: "omit",
     body: JSON.stringify({
-      content,
-      title: session.title || "Devin session"
+      token: auth.token,
+      orgId: auth.orgId,
+      devinId: session.devinId
     })
   });
   if (!response.ok) {
@@ -2488,7 +2488,7 @@ async function shareSession(session, auth) {
     setToolbarStatus("分享链接已生成，但复制失败，请手动复制", true);
     return payload.url;
   }
-  setToolbarStatus("已复制分享链接（内容为当前快照）");
+  setToolbarStatus("已复制分享链接（对方可实时读取该会话；令牌过期或撤销后失效）");
   return payload.url;
 }
 

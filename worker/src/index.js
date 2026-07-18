@@ -1,7 +1,10 @@
 const ALLOWED_ORIGIN = "https://app.devin.ai";
+const DEVIN_ORIGIN = "https://app.devin.ai";
 const DEFAULT_TTL_SECONDS = 86400;
-const MAX_CONTENT_BYTES = 2 * 1024 * 1024;
+const MAX_BODY_BYTES = 64 * 1024;
 const SHARE_ID_BYTES = 16;
+const IV_BYTES = 12;
+const encoder = new TextEncoder();
 
 function corsHeaders(origin) {
   if (origin !== ALLOWED_ORIGIN) return {};
@@ -53,28 +56,91 @@ function validShareId(id) {
   return /^[a-f0-9]{32}$/i.test(id);
 }
 
+function bytesToBase64(bytes) {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function base64ToBytes(value) {
+  const binary = atob(value);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+async function encryptionKey(env) {
+  if (!env.SHARE_KEY) throw new Error("SHARE_KEY is not configured");
+  const digest = await crypto.subtle.digest("SHA-256", encoder.encode(env.SHARE_KEY));
+  return crypto.subtle.importKey(
+    "raw",
+    digest,
+    { name: "AES-GCM" },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+async function encryptShare(payload, env) {
+  const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    await encryptionKey(env),
+    encoder.encode(JSON.stringify(payload))
+  );
+  return {
+    iv: bytesToBase64(iv),
+    ciphertext: bytesToBase64(new Uint8Array(ciphertext))
+  };
+}
+
+async function decryptShare(stored, env) {
+  const plaintext = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: base64ToBytes(stored.iv) },
+    await encryptionKey(env),
+    base64ToBytes(stored.ciphertext)
+  );
+  return JSON.parse(new TextDecoder().decode(plaintext));
+}
+
+function normalizeDevinId(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  let id = raw;
+  try {
+    const url = new URL(raw);
+    if (url.origin !== DEVIN_ORIGIN) return "";
+    const match = url.pathname.match(/^\/sessions\/([^/]+)\/?$/);
+    if (!match) return "";
+    id = match[1];
+  } catch {
+    // Treat non-URL input as a bare session ID.
+  }
+  id = id.replace(/^devin-/i, "");
+  return /^[A-Za-z0-9_-]+$/.test(id) ? `devin-${id}` : "";
+}
+
 async function createShare(request, env, origin) {
   if (!isAllowedMutationOrigin(origin)) {
     return textResponse("Origin not allowed", 403, corsHeaders(origin));
   }
   const contentLength = Number(request.headers.get("content-length"));
-  if (Number.isFinite(contentLength) && contentLength > MAX_CONTENT_BYTES) {
-    return jsonResponse({ error: "content too large" }, 413, origin);
+  if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
+    return jsonResponse({ error: "request too large" }, 413, origin);
   }
   let body;
   try {
     const raw = await request.text();
-    if (new TextEncoder().encode(raw).byteLength > MAX_CONTENT_BYTES) {
-      return jsonResponse({ error: "content too large" }, 413, origin);
+    if (encoder.encode(raw).byteLength > MAX_BODY_BYTES) {
+      return jsonResponse({ error: "request too large" }, 413, origin);
     }
     body = JSON.parse(raw);
   } catch {
     return jsonResponse({ error: "invalid JSON" }, 400, origin);
   }
-  if (!body || typeof body.content !== "string" || !body.content.trim()) {
-    return jsonResponse({ error: "content is required" }, 400, origin);
+  const devinId = normalizeDevinId(body?.devinId);
+  if (!body || typeof body.token !== "string" || !body.token.trim()
+      || typeof body.orgId !== "string" || !body.orgId.trim() || !devinId) {
+    return jsonResponse({ error: "token, orgId, and devinId are required" }, 400, origin);
   }
-  const title = typeof body.title === "string" ? body.title.slice(0, 300) : "Devin session";
   const ttl = shareTtlSeconds(env);
   let id = "";
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -85,13 +151,18 @@ async function createShare(request, env, origin) {
     }
   }
   if (!id) return jsonResponse({ error: "could not allocate share id" }, 503, origin);
-  const createdAt = new Date().toISOString();
+  let encrypted;
+  try {
+    encrypted = await encryptShare({
+      token: body.token,
+      orgId: body.orgId,
+      devinId
+    }, env);
+  } catch {
+    return jsonResponse({ error: "share encryption is unavailable" }, 503, origin);
+  }
   const expiresAt = new Date(Date.now() + ttl * 1000).toISOString();
-  await env.SHARES.put(id, JSON.stringify({
-    content: body.content,
-    title,
-    createdAt
-  }), { expirationTtl: ttl });
+  await env.SHARES.put(id, JSON.stringify(encrypted), { expirationTtl: ttl });
   return jsonResponse({
     url: `${new URL(request.url).origin}/s/${id}`,
     id,
@@ -99,22 +170,123 @@ async function createShare(request, env, origin) {
   }, 201, origin);
 }
 
+function apiHeaders(token, orgId) {
+  return {
+    Authorization: `Bearer ${token}`,
+    "x-cog-org-id": orgId,
+    accept: "application/json"
+  };
+}
+
+class ShareExpiredError extends Error {}
+
+async function fetchDevinJson(path, token, orgId) {
+  const response = await fetch(`${DEVIN_ORIGIN}${path}`, {
+    headers: apiHeaders(token, orgId)
+  });
+  if (response.status === 401 || response.status === 403) {
+    throw new ShareExpiredError("Share expired: the Devin login token is no longer valid");
+  }
+  if (!response.ok) {
+    throw new Error(`Devin request failed (HTTP ${response.status})`);
+  }
+  return response.json();
+}
+
+async function fetchSessionEvents(devinId, token, orgId) {
+  const events = [];
+  let cursor = "";
+  for (let page = 0; page < 200; page += 1) {
+    const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+    const response = await fetch(
+      `${DEVIN_ORIGIN}/api/events/${encodeURIComponent(devinId)}${query}`,
+      { headers: apiHeaders(token, orgId) }
+    );
+    if (response.status === 401 || response.status === 403) {
+      throw new ShareExpiredError("Share expired: the Devin login token is no longer valid");
+    }
+    if (!response.ok) {
+      throw new Error(`Devin events request failed (HTTP ${response.status})`);
+    }
+    const payload = await response.json();
+    const pageEvents = Array.isArray(payload.result) ? payload.result : [];
+    events.push(...pageEvents);
+    if (!payload.next_cursor || pageEvents.length === 0) break;
+    cursor = payload.next_cursor;
+  }
+  return events;
+}
+
+function eventText(event) {
+  const keys = event?.type === "user_question_answered"
+    ? ["message", "answer", "answer_text", "response", "text"]
+    : ["message", "text"];
+  for (const key of keys) {
+    if (typeof event?.[key] === "string" && event[key].trim()) return event[key].trim();
+  }
+  return "";
+}
+
+function renderMarkdown(metadata, events) {
+  const title = String(metadata?.title || "Devin session").trim();
+  const lines = [`# ${title}`, ""];
+  const messages = events
+    .map((event, index) => ({ event, index }))
+    .filter(({ event }) => ["user_message", "devin_message", "user_question_answered"].includes(event?.type))
+    .map(({ event, index }) => ({
+      index,
+      createdAt: Number(event.created_at_ms),
+      role: event.type === "devin_message" ? "Devin" : "User",
+      text: eventText(event)
+    }))
+    .filter((message) => message.text)
+    .sort((left, right) => (
+      (Number.isFinite(left.createdAt) ? left.createdAt : Number.POSITIVE_INFINITY)
+      - (Number.isFinite(right.createdAt) ? right.createdAt : Number.POSITIVE_INFINITY)
+      || left.index - right.index
+    ));
+  for (const message of messages) {
+    lines.push(`### ${message.role}`, "", message.text, "");
+  }
+  return `${lines.join("\n").trimEnd()}\n`;
+}
+
 async function readShare(id, env) {
   if (!validShareId(id)) return textResponse("Not found", 404);
   const stored = await env.SHARES.get(id, "json");
-  if (!stored || typeof stored.content !== "string") {
-    return textResponse("Not found", 404);
+  if (!stored?.iv || !stored?.ciphertext) return textResponse("Not found", 404);
+  let share;
+  try {
+    share = await decryptShare(stored, env);
+  } catch {
+    return textResponse("Share expired or unavailable", 410);
   }
-  return new Response(stored.content, {
-    status: 200,
-    headers: {
-      "content-type": "text/markdown; charset=utf-8",
-      "cache-control": "no-store"
+  if (!share?.token || !share?.orgId || !share?.devinId) {
+    return textResponse("Share expired or unavailable", 410);
+  }
+  try {
+    const metadata = await fetchDevinJson(
+      `/api/sessions/${encodeURIComponent(share.devinId)}`,
+      share.token,
+      share.orgId
+    );
+    const events = await fetchSessionEvents(share.devinId, share.token, share.orgId);
+    return new Response(renderMarkdown(metadata, events), {
+      status: 200,
+      headers: {
+        "content-type": "text/markdown; charset=utf-8",
+        "cache-control": "no-store"
+      }
+    });
+  } catch (error) {
+    if (error instanceof ShareExpiredError) {
+      return textResponse(error.message, 410);
     }
-  });
+    return textResponse("Unable to read the live Devin session", 502);
+  }
 }
 
-async function deleteShare(id, request, env, origin) {
+async function deleteShare(id, env, origin) {
   if (!isAllowedMutationOrigin(origin)) {
     return textResponse("Origin not allowed", 403, corsHeaders(origin));
   }
@@ -135,12 +307,8 @@ export default {
       return createShare(request, env, origin);
     }
     const match = url.pathname.match(/^\/s\/([^/]+)$/);
-    if (match && request.method === "GET") {
-      return readShare(match[1], env);
-    }
-    if (match && request.method === "DELETE") {
-      return deleteShare(match[1], request, env, origin);
-    }
+    if (match && request.method === "GET") return readShare(match[1], env);
+    if (match && request.method === "DELETE") return deleteShare(match[1], env, origin);
     return textResponse("Not found", 404);
   }
 };
