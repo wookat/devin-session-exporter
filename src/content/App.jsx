@@ -363,15 +363,27 @@ function AccountList({ onEdit }) {
   const accounts = core.getAccounts();
   const total = accounts.length;
   const selectedCount = core.getSelectedCount();
-  const exportSelectedOrAll = () => {
-    const selectedAccounts = selectedCount
+  const selectedOrAllAccounts = () =>
+    selectedCount
       ? accounts.filter((account) => core.isAccountSelected(core.accountKey(account)))
       : accounts;
+  const exportSelectedOrAll = () => {
     downloadText(
       `devin-accounts-${core.fileDateStamp()}.txt`,
-      core.exportAccounts(selectedAccounts)
+      core.exportAccounts(selectedOrAllAccounts())
     );
     core.setToolbarStatus(selectedCount ? `已导出 ${selectedCount} 个账号` : `已导出 ${total} 个账号`);
+  };
+  const copySelectedOrAll = async () => {
+    try {
+      const ok = await core.copyToClipboard(core.exportAccounts(selectedOrAllAccounts()));
+      core.setToolbarStatus(
+        ok ? `已复制 ${selectedCount || total} 个账号` : "复制失败，请手动复制",
+        !ok
+      );
+    } catch (error) {
+      reportError(error);
+    }
   };
   if (!total) {
     return (
@@ -409,6 +421,9 @@ function AccountList({ onEdit }) {
         </button>
         <button type="button" onClick={exportSelectedOrAll}>
           {selectedCount ? "导出选中账号" : "导出全部账号"}
+        </button>
+        <button type="button" onClick={copySelectedOrAll}>
+          {selectedCount ? "复制选中账号" : "复制全部账号"}
         </button>
       </div>
       {accounts.map((account, index) => (
