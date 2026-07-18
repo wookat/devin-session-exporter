@@ -1,6 +1,7 @@
 import React, {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore
@@ -252,6 +253,26 @@ function AccountRow({ account, index, total, onEdit }) {
         >
           ▤
         </button>
+        <button
+          type="button"
+          className="devin-account-action-icon"
+          title="上移账号"
+          aria-label="上移账号"
+          disabled={index === 0}
+          onClick={() => core.moveAccount(index, -1)}
+        >
+          ↑
+        </button>
+        <button
+          type="button"
+          className="devin-account-action-icon"
+          title="下移账号"
+          aria-label="下移账号"
+          disabled={index === total - 1}
+          onClick={() => core.moveAccount(index, 1)}
+        >
+          ↓
+        </button>
         <div className="devin-account-overflow" ref={menuRef}>
           <button
             type="button"
@@ -296,28 +317,6 @@ function AccountRow({ account, index, total, onEdit }) {
                 }}
               >
                 <span aria-hidden="true">🗑</span> 删除
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                disabled={index === 0}
-                onClick={() => {
-                  setMenuOpen(false);
-                  core.moveAccount(index, -1);
-                }}
-              >
-                <span aria-hidden="true">↑</span> 上移
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                disabled={index === total - 1}
-                onClick={() => {
-                  setMenuOpen(false);
-                  core.moveAccount(index, 1);
-                }}
-              >
-                <span aria-hidden="true">↓</span> 下移
               </button>
             </div>
           ) : null}
@@ -439,11 +438,29 @@ function PromptSnippets() {
   );
 }
 
+function ThemeToggle({ onToggle }) {
+  useStore();
+  const theme = core.getTheme();
+  const nextTheme = theme === "dark" ? "light" : "dark";
+  return (
+    <button
+      type="button"
+      className="devin-theme-toggle"
+      title={nextTheme === "dark" ? "切换到深色主题" : "切换到浅色主题"}
+      aria-label={nextTheme === "dark" ? "切换到深色主题" : "切换到浅色主题"}
+      onClick={onToggle || (() => core.setTheme(nextTheme))}
+    >
+      {theme === "dark" ? "☀" : "☾"}
+    </button>
+  );
+}
+
 function SettingsPanel({ onClose }) {
   useStore();
   const [settings, setSettings] = useState(null);
   const [template, setTemplate] = useState(core.DEFAULT_HANDOFF_TEMPLATE);
   const [batchText, setBatchText] = useState("");
+  const theme = core.getTheme();
 
   useEffect(() => {
     core
@@ -456,15 +473,21 @@ function SettingsPanel({ onClose }) {
   }, []);
 
   const patch = (key, value) => setSettings((prev) => ({ ...prev, [key]: value }));
+  const toggleTheme = () => {
+    const nextTheme = theme === "dark" ? "light" : "dark";
+    core.setTheme(nextTheme);
+    setSettings((prev) => (prev ? { ...prev, theme: nextTheme } : prev));
+  };
 
   if (!settings) {
     return (
       <div id="devin-exporter-settings">
         <div className="devin-settings-header">
           <h2>Devin Exporter</h2>
-          <button type="button" className="devin-close-x" title="关闭" onClick={onClose}>
-            ×
-          </button>
+          <div className="devin-header-actions">
+            <ThemeToggle onToggle={toggleTheme} />
+            <button type="button" className="devin-close-x" title="关闭" onClick={onClose}>×</button>
+          </div>
         </div>
         <p>正在加载…</p>
       </div>
@@ -484,9 +507,10 @@ function SettingsPanel({ onClose }) {
     <div id="devin-exporter-settings">
       <div className="devin-settings-header">
         <h2>Devin Exporter</h2>
-        <button type="button" className="devin-close-x" title="关闭" onClick={onClose}>
-          ×
-        </button>
+        <div className="devin-header-actions">
+          <ThemeToggle onToggle={toggleTheme} />
+          <button type="button" className="devin-close-x" title="关闭" onClick={onClose}>×</button>
+        </div>
       </div>
 
       {core.getUpdateVersion() ? (
@@ -604,7 +628,13 @@ function SettingsPanel({ onClose }) {
 }
 
 export function App() {
+  useStore();
   const [panelOpen, setPanelOpen] = useState(false);
+  const theme = core.getTheme();
+  useLayoutEffect(() => {
+    const root = document.getElementById("devin-exporter-root");
+    if (root) root.dataset.theme = theme;
+  }, [theme]);
   return (
     <>
       <Toolbar onToggleSettings={() => setPanelOpen((open) => !open)} />

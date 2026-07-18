@@ -1,11 +1,16 @@
-#devin-exporter-toolbar,
-#devin-exporter-settings {
+#devin-exporter-root {
   --devin-accent: #6d8dff;
   --devin-accent-strong: #5278f5;
   --devin-surface-0: #10141b;
   --devin-surface-1: #151b24;
   --devin-surface-2: #1b2430;
   --devin-surface-3: #222d3a;
+  --devin-toolbar-bg: rgb(16 20 27 / 94%);
+  --devin-panel-bg: rgb(16 20 27 / 98%);
+  --devin-current-bg: linear-gradient(135deg, var(--devin-surface-1), #18202c);
+  --devin-input-focus-bg: #121923;
+  --devin-switch-bg: #294b91;
+  --devin-switch-border: #456bc7;
   --devin-border: #2a3543;
   --devin-border-subtle: #202a35;
   --devin-text: #edf1f7;
@@ -23,11 +28,39 @@
   --devin-radius-lg: 11px;
   --devin-control-height: 28px;
   --devin-transition: 140ms ease;
+  color-scheme: dark;
+}
+
+#devin-exporter-root[data-theme="light"] {
+  --devin-accent: #5278dd;
+  --devin-accent-strong: #4268d0;
+  --devin-surface-0: #f5f7fa;
+  --devin-surface-1: #edf1f6;
+  --devin-surface-2: #e5eaf1;
+  --devin-surface-3: #dbe3ed;
+  --devin-toolbar-bg: rgb(255 255 255 / 96%);
+  --devin-panel-bg: rgb(255 255 255 / 98%);
+  --devin-current-bg: linear-gradient(135deg, #f8fafc, #eef3f9);
+  --devin-input-focus-bg: #fff;
+  --devin-switch-bg: #dce7ff;
+  --devin-switch-border: #9eb5ed;
+  --devin-border: #cbd5e1;
+  --devin-border-subtle: #e2e8f0;
+  --devin-text: #172131;
+  --devin-text-secondary: #425168;
+  --devin-text-muted: #68778c;
+  --devin-danger: #c83e55;
+  --devin-positive: #18734b;
+  --devin-warning: #8b5c08;
+  color-scheme: light;
+}
+
+#devin-exporter-toolbar,
+#devin-exporter-settings {
   position: fixed;
   z-index: 2147483647;
   box-sizing: border-box;
   color: var(--devin-text);
-  color-scheme: dark;
   font: 12px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
@@ -47,7 +80,7 @@
   padding: var(--devin-space-1);
   border: 1px solid var(--devin-border);
   border-radius: var(--devin-radius-md);
-  background: rgb(16 20 27 / 94%);
+  background: var(--devin-toolbar-bg);
   box-shadow: 0 8px 24px rgb(0 0 0 / 20%);
 }
 
@@ -60,7 +93,7 @@
   padding: var(--devin-space-3);
   border: 1px solid var(--devin-border);
   border-radius: var(--devin-radius-lg);
-  background: rgb(16 20 27 / 98%);
+  background: var(--devin-panel-bg);
   box-shadow: 0 16px 40px rgb(0 0 0 / 34%);
   scrollbar-color: var(--devin-border) transparent;
   scrollbar-width: thin;
@@ -198,6 +231,12 @@
   border-bottom: 1px solid var(--devin-border-subtle);
 }
 
+.devin-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--devin-space-1);
+}
+
 #devin-exporter-settings h2 {
   margin: 0;
   color: var(--devin-text);
@@ -236,6 +275,14 @@
   color: var(--devin-text)!important;
 }
 
+.devin-theme-toggle {
+  width: var(--devin-control-height);
+  min-width: var(--devin-control-height);
+  padding: 0!important;
+  color: var(--devin-text-secondary)!important;
+  font-size: 14px!important;
+}
+
 .devin-current {
   display: grid;
   gap: var(--devin-space-2);
@@ -243,7 +290,7 @@
   padding: var(--devin-space-3);
   border: 1px solid var(--devin-border);
   border-radius: var(--devin-radius-md);
-  background: linear-gradient(135deg, var(--devin-surface-1), #18202c);
+  background: var(--devin-current-bg);
 }
 
 .devin-current-line {
@@ -454,7 +501,7 @@
 #devin-exporter-settings input[type="password"]:focus,
 #devin-exporter-settings textarea:focus {
   border-color: var(--devin-accent);
-  background: #121923;
+  background: var(--devin-input-focus-bg);
 }
 
 #devin-exporter-settings textarea {
@@ -655,8 +702,8 @@
 }
 
 .devin-account-actions button.devin-account-switch {
-  border-color: #456bc7;
-  background: #294b91;
+  border-color: var(--devin-switch-border);
+  background: var(--devin-switch-bg);
   color: #e5edff;
   font-weight: 650;
 }
