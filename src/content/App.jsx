@@ -1,6 +1,7 @@
 import React, {
   useCallback,
   useEffect,
+  useRef,
   useState,
   useSyncExternalStore
 } from "react";
@@ -85,8 +86,10 @@ function CurrentAccountCard() {
           ↻
         </button>
       </div>
-      <div className={`devin-current-meta ${info ? core.balanceToneClass(info) : ""}`}>
-        {info ? core.formatBalanceDisplay(info) : "余额 — · 上限 —"}
+      <div className="devin-current-meta">
+        <span className={`devin-current-balance-pill ${info ? core.balanceToneClass(info) : ""}`}>
+          {info ? core.formatBalanceDisplay(info) : "余额 — · 上限 —"}
+        </span>
       </div>
       <div className="devin-current-actions">
         <button type="button" onClick={() => core.beginAutoSwitch(true).catch(reportError)}>
@@ -163,6 +166,25 @@ function AccountRow({ account, index, total, onEdit }) {
   const sessionsState = core.getSessionsState(key);
   const selected = core.isAccountSelected(key);
   const hasLatest = latest && latest.session && latest.session.sessionId;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    const closeOnOutside = (event) => {
+      if (!menuRef.current?.contains(event.target)) setMenuOpen(false);
+    };
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", closeOnOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [menuOpen]);
+
   return (
     <div className={account.archived ? "devin-account-row devin-account-archived" : "devin-account-row"}>
       <div className="devin-account-main">
@@ -230,56 +252,76 @@ function AccountRow({ account, index, total, onEdit }) {
         >
           ▤
         </button>
-        <button
-          type="button"
-          className="devin-account-action-icon"
-          title="编辑账号"
-          aria-label="编辑账号"
-          onClick={() => {
-            onEdit(core.accountEditText(account));
-            core.setToolbarStatus("已填入文本框，修改后点「添加账号」按相同邮箱更新");
-          }}
-        >
-          ✎
-        </button>
-        <button
-          type="button"
-          className="devin-account-action-icon"
-          title={account.archived ? "取消归档" : "归档账号"}
-          aria-label={account.archived ? "取消归档" : "归档账号"}
-          onClick={() => core.toggleAccountArchive(index).catch(reportError)}
-        >
-          ▣
-        </button>
-        <button
-          type="button"
-          className="devin-account-action-icon"
-          title="删除账号"
-          aria-label="删除账号"
-          onClick={() => core.deleteAccount(key).catch(reportError)}
-        >
-          🗑
-        </button>
-        <button
-          type="button"
-          className="devin-account-action-icon"
-          title="上移账号"
-          aria-label="上移账号"
-          disabled={index === 0}
-          onClick={() => core.moveAccount(index, -1)}
-        >
-          ↑
-        </button>
-        <button
-          type="button"
-          className="devin-account-action-icon"
-          title="下移账号"
-          aria-label="下移账号"
-          disabled={index === total - 1}
-          onClick={() => core.moveAccount(index, 1)}
-        >
-          ↓
-        </button>
+        <div className="devin-account-overflow" ref={menuRef}>
+          <button
+            type="button"
+            className="devin-account-action-icon devin-account-more"
+            title="更多操作"
+            aria-label="更多操作"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((open) => !open)}
+          >
+            ⋯
+          </button>
+          {menuOpen ? (
+            <div className="devin-account-menu" role="menu">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onEdit(core.accountEditText(account));
+                  core.setToolbarStatus("已填入文本框，修改后点「添加账号」按相同邮箱更新");
+                }}
+              >
+                <span aria-hidden="true">✎</span> 编辑
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  core.toggleAccountArchive(index).catch(reportError);
+                }}
+              >
+                <span aria-hidden="true">▣</span> {account.archived ? "取消归档" : "归档"}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  core.deleteAccount(key).catch(reportError);
+                }}
+              >
+                <span aria-hidden="true">🗑</span> 删除
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={index === 0}
+                onClick={() => {
+                  setMenuOpen(false);
+                  core.moveAccount(index, -1);
+                }}
+              >
+                <span aria-hidden="true">↑</span> 上移
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={index === total - 1}
+                onClick={() => {
+                  setMenuOpen(false);
+                  core.moveAccount(index, 1);
+                }}
+              >
+                <span aria-hidden="true">↓</span> 下移
+              </button>
+            </div>
+          ) : null}
+        </div>
       </div>
       <AccountSessions account={account} sessionKey={key} />
     </div>
@@ -481,23 +523,23 @@ function SettingsPanel({ onClose }) {
           </label>
         </div>
         <div className="devin-toggle-row">
-          <label>
+          <label className="devin-toggle">
             <input
               type="checkbox"
               checked={settings.autoSwitchEnabled}
               onChange={(event) => patch("autoSwitchEnabled", event.target.checked)}
-            />{" "}
-            自动换号
+            />
+            <span>自动换号</span>
           </label>
-          <label>
+          <label className="devin-toggle">
             <input
               type="checkbox"
               checked={settings.autoSendContinuation}
               onChange={(event) => patch("autoSendContinuation", event.target.checked)}
-            />{" "}
-            自动发送续接
+            />
+            <span>自动发送续接</span>
           </label>
-          <label>
+          <label className="devin-toggle">
             <input
               type="checkbox"
               checked={settings.encryptionEnabled}
@@ -505,8 +547,8 @@ function SettingsPanel({ onClose }) {
                 patch("encryptionEnabled", event.target.checked);
                 core.setEncryptionEnabled(event.target.checked);
               }}
-            />{" "}
-            加密账号
+            />
+            <span>加密账号</span>
           </label>
         </div>
         <div className="devin-settings-actions">
