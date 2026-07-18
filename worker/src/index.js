@@ -382,6 +382,19 @@ function truncateOutput(value, maxLength = 400) {
   return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
 }
 
+function formatTime(ms) {
+  const time = Number(ms);
+  if (!Number.isFinite(time)) return "";
+  const date = new Date(time);
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`;
+}
+
+function firstLine(value, maxLength = 200) {
+  const line = String(value || "").trim().split("\n").find((item) => item.trim());
+  return truncateOutput(line || "", maxLength);
+}
+
 function sortedByTime(events) {
   return events
     .map((event, index) => ({ event, index }))
@@ -405,6 +418,8 @@ function renderWorklog(events) {
         if (typeof event.command !== "string" || !event.command.trim()) break;
         const entry = { text: `- $ ${event.command.trim()}`, output: "" };
         lines.push(entry);
+        const startedAt = formatTime(event.created_at_ms);
+        if (startedAt) entry.text = `- [${startedAt}] $ ${event.command.trim()}`;
         if (event.process_id != null) commandLines.set(String(event.process_id), entry);
         break;
       }
@@ -445,6 +460,9 @@ function renderWorklog(events) {
   }
   const rendered = [];
   for (const entry of lines) {
+    if (entry.text.startsWith("- $ ") || /^- \[\d\d-\d\d \d\d:\d\d\] \$ /.test(entry.text)) {
+      if (!entry.completed) entry.text += "  ⏳（未见完成事件，可能在此中断）";
+    }
     rendered.push(entry.text);
     if (entry.output) {
       rendered.push("  ```", ...entry.output.split("\n").map((line) => `  ${line}`), "  ```");
@@ -465,14 +483,50 @@ function renderPullRequests(metadata) {
     .filter(Boolean);
 }
 
+function buildTldr(metadata, events, messages) {
+  const lines = ["## TL;DR（AI 先读这里）", ""];
+  const goal = messages.find((message) => message.role === "User");
+  if (goal) lines.push(`- **目标**：${firstLine(goal.text, 300)}`);
+  const status = String(metadata?.status_enum || metadata?.status || "").trim();
+  if (status) lines.push(`- **会话状态**：${status}`);
+  const latestTodos = sortedByTime(events).reverse()
+    .find((event) => event?.type === "todo_update" && Array.isArray(event.todos) && event.todos.length);
+  if (latestTodos) {
+    const todos = latestTodos.todos;
+    const done = todos.filter((todo) => todo?.status === "completed").length;
+    lines.push(`- **TODO 进度**：${done}/${todos.length} 完成`);
+    const next = todos.filter((todo) => todo?.status !== "completed").slice(0, 5);
+    if (next.length) {
+      lines.push("- **下一步**：");
+      for (const todo of next) lines.push(`  - [ ] ${String(todo?.content || "").trim()}`);
+    }
+  }
+  const interrupted = [];
+  const running = new Map();
+  for (const event of sortedByTime(events)) {
+    if ((event?.type === "shell_process_started" || event?.type === "shell_process_started_background") && typeof event.command === "string" && event.command.trim()) {
+      if (event.process_id != null) running.set(String(event.process_id), event);
+    } else if ((event?.type === "shell_process_completed" || event?.type === "shell_process_completed_background") && event.process_id != null) {
+      running.delete(String(event.process_id));
+    }
+  }
+  for (const event of running.values()) interrupted.push(event);
+  const lastInterrupted = interrupted[interrupted.length - 1];
+  if (lastInterrupted) {
+    lines.push(`- **中断点**：上个会话停在 \`$ ${firstLine(lastInterrupted.command, 200)}\`（已启动、未见完成事件）`);
+  }
+  const lastDevin = [...messages].reverse().find((message) => message.role === "Devin");
+  if (lastDevin) {
+    lines.push("- **最新进展（Devin 最后一条回复）**：", "");
+    lines.push(`> ${truncateOutput(lastDevin.text, 800).split("\n").join("\n> ")}`);
+  }
+  lines.push("", "> 阅读指引：先看本段掌握目标/进度/下一步；「时间线（对话）」按时间顺序带时间戳；「Worklog」是逐条执行记录，带 ⏳ 的命令可能是中断点。续接时从「下一步」与「中断点」开始。", "");
+  return lines;
+}
+
 async function renderMarkdown(metadata, events, attachmentCtx) {
   const title = String(metadata?.title || "Devin session").trim();
   const lines = [`# ${title}`, ""];
-  const pulls = renderPullRequests(metadata);
-  if (pulls.length) {
-    lines.push("## Pull Requests", "", ...pulls, "");
-  }
-  lines.push("## Conversation", "");
   const messages = events
     .map((event, index) => ({ event, index }))
     .filter(({ event }) => ["initial_user_message", "user_message", "devin_message", "user_question_answered"].includes(event?.type))
@@ -488,9 +542,16 @@ async function renderMarkdown(metadata, events, attachmentCtx) {
       - (Number.isFinite(right.createdAt) ? right.createdAt : Number.POSITIVE_INFINITY)
       || left.index - right.index
     ));
+  lines.push(...buildTldr(metadata, events, messages));
+  const pulls = renderPullRequests(metadata);
+  if (pulls.length) {
+    lines.push("## Pull Requests", "", ...pulls, "");
+  }
+  lines.push("## 时间线（对话）", "");
   for (const message of messages) {
     const text = attachmentCtx ? await rewriteAttachments(message.text, attachmentCtx) : message.text;
-    lines.push(`### ${message.role}`, "", text, "");
+    const time = formatTime(message.createdAt);
+    lines.push(`### ${time ? `[${time}] ` : ""}${message.role}`, "", text, "");
   }
   const latestTodos = sortedByTime(events).reverse()
     .find((event) => event?.type === "todo_update" && Array.isArray(event.todos) && event.todos.length);
@@ -620,6 +681,7 @@ export default {
 };
 
 export {
+  renderMarkdown,
   parseAttachmentMarker,
   attachmentName,
   attachmentRelativePath,
