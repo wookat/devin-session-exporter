@@ -501,6 +501,15 @@ async function renderMarkdown(metadata, events, attachmentCtx) {
     }
     lines.push("");
   }
+  const latestTodos = sortedByTime(events).reverse()
+    .find((event) => event?.type === "todo_update" && Array.isArray(event.todos) && event.todos.length);
+  if (latestTodos) {
+    lines.push("## Todos（最新状态）", "");
+    for (const todo of latestTodos.todos) {
+      lines.push(`- ${todo?.status === "completed" ? "[x]" : "[ ]"} ${String(todo?.content || "").trim()}`);
+    }
+    lines.push("");
+  }
   const worklog = renderWorklog(events);
   if (worklog.length) {
     lines.push("## Worklog（执行详情）", "", ...worklog, "");
