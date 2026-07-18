@@ -227,9 +227,92 @@ function eventText(event) {
   return "";
 }
 
+function truncateOutput(value, maxLength = 400) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
+}
+
+function sortedByTime(events) {
+  return events
+    .map((event, index) => ({ event, index }))
+    .sort((left, right) => {
+      const leftTime = Number(left.event?.created_at_ms);
+      const rightTime = Number(right.event?.created_at_ms);
+      return (Number.isFinite(leftTime) ? leftTime : Number.POSITIVE_INFINITY)
+        - (Number.isFinite(rightTime) ? rightTime : Number.POSITIVE_INFINITY)
+        || left.index - right.index;
+    })
+    .map(({ event }) => event);
+}
+
+function renderWorklog(events) {
+  const lines = [];
+  const commandLines = new Map();
+  for (const event of sortedByTime(events)) {
+    switch (event?.type) {
+      case "shell_process_started":
+      case "shell_process_started_background": {
+        if (typeof event.command !== "string" || !event.command.trim()) break;
+        const entry = { text: `- $ ${event.command.trim()}`, output: "" };
+        lines.push(entry);
+        if (event.process_id != null) commandLines.set(String(event.process_id), entry);
+        break;
+      }
+      case "shell_process_completed":
+      case "shell_process_completed_background": {
+        const entry = event.process_id == null ? null : commandLines.get(String(event.process_id));
+        if (!entry) break;
+        if (event.exit_code != null) entry.text += `  → 退出码 ${event.exit_code}`;
+        const output = truncateOutput(event.output_trunc);
+        if (output) entry.output = output;
+        break;
+      }
+      case "multi_edit_result":
+        for (const update of Array.isArray(event.file_updates) ? event.file_updates : []) {
+          if (!update?.file_path) continue;
+          lines.push({ text: `- ${update.action_type === "open" ? "读取" : "编辑"} ${update.file_path}` });
+        }
+        break;
+      case "search_file_commands":
+        for (const search of Array.isArray(event.search_commands) ? event.search_commands : []) {
+          lines.push({ text: `- 搜索 ${search?.regex || ""} 于 ${search?.path || "unknown path"}` });
+        }
+        break;
+      default:
+        break;
+    }
+  }
+  const rendered = [];
+  for (const entry of lines) {
+    rendered.push(entry.text);
+    if (entry.output) {
+      rendered.push("  ```", ...entry.output.split("\n").map((line) => `  ${line}`), "  ```");
+    }
+  }
+  return rendered;
+}
+
+function renderPullRequests(metadata) {
+  const pulls = Array.isArray(metadata?.pull_requests) ? metadata.pull_requests : [];
+  return pulls
+    .map((pull) => {
+      const url = typeof pull?.url === "string" ? pull.url : (typeof pull?.pr_url === "string" ? pull.pr_url : "");
+      if (!url) return "";
+      const status = pull?.status || pull?.state || "";
+      return `- ${url}${status ? ` (${status})` : ""}`;
+    })
+    .filter(Boolean);
+}
+
 function renderMarkdown(metadata, events) {
   const title = String(metadata?.title || "Devin session").trim();
   const lines = [`# ${title}`, ""];
+  const pulls = renderPullRequests(metadata);
+  if (pulls.length) {
+    lines.push("## Pull Requests", "", ...pulls, "");
+  }
+  lines.push("## Conversation", "");
   const messages = events
     .map((event, index) => ({ event, index }))
     .filter(({ event }) => ["user_message", "devin_message", "user_question_answered"].includes(event?.type))
@@ -247,6 +330,10 @@ function renderMarkdown(metadata, events) {
     ));
   for (const message of messages) {
     lines.push(`### ${message.role}`, "", message.text, "");
+  }
+  const worklog = renderWorklog(events);
+  if (worklog.length) {
+    lines.push("## Worklog（执行详情）", "", ...worklog, "");
   }
   return `${lines.join("\n").trimEnd()}\n`;
 }
