@@ -2456,8 +2456,8 @@ async function exportSessionHandoff(session, auth) {
   return text;
 }
 
-async function shareSession(session, auth) {
-  const stored = await storageGet(["shareServiceUrl"]);
+async function shareSession(session, auth, options = {}) {
+  const stored = await storageGet(["shareServiceUrl", "continuationTemplate"]);
   const serviceUrl = String(
     stored.shareServiceUrl || DEFAULT_SHARE_SERVICE_URL
   ).trim().replace(/\/+$/, "");
@@ -2483,13 +2483,39 @@ async function shareSession(session, auth) {
   if (!payload?.url || typeof payload.url !== "string") {
     throw new Error("分享服务返回了无效链接");
   }
-  const copied = await copyToClipboard(payload.url);
+  const clipboardText = options.asContinuation
+    ? buildContinuationText(stored.continuationTemplate || DEFAULT_HANDOFF_TEMPLATE, payload.url)
+    : payload.url;
+  const copied = await copyToClipboard(clipboardText);
   if (!copied) {
-    setToolbarStatus("分享链接已生成，但复制失败，请手动复制", true);
+    setToolbarStatus("转接链接已生成，但复制失败，请手动复制", true);
     return payload.url;
   }
-  setToolbarStatus("已复制分享链接（对方可实时读取该会话；令牌过期或撤销后失效）");
+  setToolbarStatus(options.asContinuation
+    ? "已复制转接消息（含跨账号链接），粘到新会话即可续接"
+    : "已复制分享链接（对方可实时读取该会话；令牌过期或撤销后失效）");
   return payload.url;
+}
+
+async function shareCurrentSession() {
+  if (!isSessionPage()) {
+    setToolbarStatus("请先打开 Devin 会话页面", true);
+    return "";
+  }
+  const sessionId = window.location.pathname.match(/^\/sessions\/([^/]+)\/?$/)[1];
+  const devinId = `devin-${sessionId}`;
+  const authSession = readAuthSession();
+  setToolbarStatus("正在生成转接链接…");
+  const { metadata, orgId } = await fetchSessionData(
+    devinId,
+    authSession.token,
+    collectOrgIds(authSession)
+  );
+  return shareSession(
+    { devinId, title: metadata?.title || sessionId },
+    { token: authSession.token, orgId },
+    { asContinuation: true }
+  );
 }
 
 function formatLatestSession(info) {
@@ -3062,6 +3088,7 @@ export {
   continueFromClipboard,
   exportSessionHandoff,
   shareSession,
+  shareCurrentSession,
   refreshBalanceDisplay,
   refreshCurrentAccount,
   refreshAccountMeta,

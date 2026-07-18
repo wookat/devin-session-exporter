@@ -162,7 +162,7 @@
   transform: none;
 }
 
-#devin-exporter-toolbar #devin-export-handoff,
+#devin-exporter-toolbar #devin-share-session,
 #devin-exporter-settings button.devin-primary {
   border-color: var(--devin-accent);
   background: var(--devin-accent-strong);
@@ -170,7 +170,7 @@
   font-weight: 650;
 }
 
-#devin-exporter-toolbar #devin-export-handoff:hover,
+#devin-exporter-toolbar #devin-share-session:hover,
 #devin-exporter-settings button.devin-primary:hover {
   border-color: #86a0ff;
   background: var(--devin-accent);

@@ -35,6 +35,17 @@ function Toolbar({ onToggleSettings }) {
   const balanceInfo = core.getCurrentBalanceInfo();
   const onSession = core.isSessionPage();
 
+  const shareCurrent = useCallback(async () => {
+    setBusy(true);
+    try {
+      await core.shareCurrentSession();
+    } catch (error) {
+      reportError(error);
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
   const exportHandoff = useCallback(async () => {
     setBusy(true);
     try {
@@ -72,6 +83,15 @@ function Toolbar({ onToggleSettings }) {
 
   return (
     <div id="devin-exporter-toolbar">
+      <button
+        id="devin-share-session"
+        type="button"
+        className={busy ? "is-loading" : ""}
+        disabled={!onSession || busy}
+        onClick={shareCurrent}
+      >
+        复制转接链接
+      </button>
       <button
         id="devin-export-handoff"
         type="button"
