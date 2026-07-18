@@ -1752,9 +1752,11 @@ async function createContinuationSession(state) {
   } catch (error) {
     setToolbarStatus(`当前账号消息上限设置失败，继续续接：${error.message}`, true);
   }
+  const handoff = stored.lastHandoff || {};
+  const handoffContent = handoff.shareUrl || handoff.text || "";
   const text = buildContinuationText(
     stored.continuationTemplate || DEFAULT_HANDOFF_TEMPLATE,
-    stored.lastHandoff?.text || ""
+    handoffContent
   );
   injectComposerText(text);
   const shouldSend = stored.autoSendContinuation !== false;
@@ -1907,7 +1909,7 @@ async function beginAutoSwitch(manual = false) {
   }
   setToolbarStatus(`将切换到 ${next.email} ...`);
   if (isSessionPage()) {
-    await exportHandoffForSwitch();
+    await captureHandoffForSwitch();
   }
   const state = {
     phase: "loggingOut",
@@ -1940,7 +1942,7 @@ async function beginSwitchToAccount(email) {
   }
   setToolbarStatus(`正在切换到 ${account.email} ...`);
   if (isSessionPage()) {
-    await exportHandoffForSwitch();
+    await captureHandoffForSwitch();
   }
   await saveAutoSwitchState({
     phase: "loggingOut",
@@ -2483,6 +2485,9 @@ async function shareSession(session, auth, options = {}) {
   if (!payload?.url || typeof payload.url !== "string") {
     throw new Error("分享服务返回了无效链接");
   }
+  if (options.copyToClipboard === false) {
+    return payload.url;
+  }
   const clipboardText = options.asContinuation
     ? buildContinuationText(stored.continuationTemplate || DEFAULT_HANDOFF_TEMPLATE, payload.url)
     : payload.url;
@@ -2516,6 +2521,46 @@ async function shareCurrentSession() {
     { token: authSession.token, orgId },
     { asContinuation: true }
   );
+}
+
+async function createSwitchShareLink() {
+  const sessionId = window.location.pathname.match(/^\/sessions\/([^/]+)\/?$/)?.[1];
+  if (!sessionId) return "";
+
+  const authSession = readAuthSession();
+  const devinId = `devin-${sessionId}`;
+  const { metadata, orgId } = await fetchSessionData(
+    devinId,
+    authSession.token,
+    collectOrgIds(authSession)
+  );
+  const title = metadata?.title || sessionId;
+  const url = await shareSession(
+    { devinId, title },
+    { token: authSession.token, orgId },
+    { copyToClipboard: false }
+  );
+  if (url) {
+    await storageSet({
+      lastHandoff: {
+        shareUrl: url,
+        exportedAt: new Date().toISOString(),
+        title,
+        url: window.location.href
+      }
+    });
+  }
+  return url || "";
+}
+
+async function captureHandoffForSwitch() {
+  try {
+    const shareUrl = await createSwitchShareLink();
+    if (shareUrl) return shareUrl;
+  } catch {
+    setToolbarStatus("生成转接链接失败，改用内嵌续接文档…", true);
+  }
+  return exportHandoffForSwitch();
 }
 
 function formatLatestSession(info) {
@@ -3089,6 +3134,8 @@ export {
   exportSessionHandoff,
   shareSession,
   shareCurrentSession,
+  createSwitchShareLink,
+  captureHandoffForSwitch,
   refreshBalanceDisplay,
   refreshCurrentAccount,
   refreshAccountMeta,
