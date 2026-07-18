@@ -46,41 +46,6 @@ function Toolbar({ onToggleSettings }) {
     }
   }, []);
 
-  const exportHandoff = useCallback(async () => {
-    setBusy(true);
-    try {
-      const { data, compact, full } = await core.exportHandoff();
-      downloadText(`devin-handoff-${core.fileDateStamp()}.md`, full || compact);
-      core.setToolbarStatus(`已保存：${data.title || "Handoff"}`);
-    } catch (error) {
-      reportError(error);
-    } finally {
-      setBusy(false);
-    }
-  }, []);
-
-  const copyContinuation = useCallback(async () => {
-    setBusy(true);
-    try {
-      await core.copyContinuationToClipboard();
-    } catch (error) {
-      reportError(error);
-    } finally {
-      setBusy(false);
-    }
-  }, []);
-
-  const continueFromClipboard = useCallback(async () => {
-    setBusy(true);
-    try {
-      await core.continueFromClipboard();
-    } catch (error) {
-      reportError(error);
-    } finally {
-      setBusy(false);
-    }
-  }, []);
-
   return (
     <div id="devin-exporter-toolbar">
       <button
@@ -91,33 +56,6 @@ function Toolbar({ onToggleSettings }) {
         onClick={shareCurrent}
       >
         复制转接链接
-      </button>
-      <button
-        id="devin-export-handoff"
-        type="button"
-        className={busy ? "is-loading" : ""}
-        disabled={!onSession || busy}
-        onClick={exportHandoff}
-      >
-        导出 Handoff
-      </button>
-      <button
-        id="devin-copy-continuation"
-        type="button"
-        className={busy ? "is-loading" : ""}
-        disabled={!onSession || busy}
-        onClick={copyContinuation}
-      >
-        复制续接内容
-      </button>
-      <button
-        id="devin-continue-from-clipboard"
-        type="button"
-        className={busy ? "is-loading" : ""}
-        disabled={busy}
-        onClick={continueFromClipboard}
-      >
-        从剪贴板续接
       </button>
       <button id="devin-settings-button" type="button" onClick={onToggleSettings}>
         设置
@@ -645,6 +583,27 @@ function SettingsPanel({ onClose }) {
       ) : null}
 
       <CurrentAccountCard />
+
+      <section className="devin-settings-section">
+        <h3>当前会话</h3>
+        <div className="devin-settings-actions">
+          <button
+            type="button"
+            disabled={!core.isSessionPage()}
+            onClick={async () => {
+              try {
+                const { data, compact, full } = await core.exportHandoff();
+                downloadText(`devin-handoff-${core.fileDateStamp()}.md`, full || compact);
+                core.setToolbarStatus(`已保存：${data.title || "Handoff"}`);
+              } catch (error) {
+                reportError(error);
+              }
+            }}
+          >
+            导出 Handoff 文档
+          </button>
+        </div>
+      </section>
 
       <section className="devin-settings-section">
         <div className="devin-field-row">
