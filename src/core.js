@@ -1396,6 +1396,19 @@ function findButtonContaining(text) {
   });
 }
 
+function advanceOnboarding() {
+  const target = [...document.querySelectorAll("button")].find((button) => {
+    const style = getComputedStyle(button);
+    return !button.disabled
+      && style.display !== "none"
+      && style.visibility !== "hidden"
+      && (button.innerText || button.textContent || "").trim().toLowerCase() === "continue";
+  });
+  if (!target) return false;
+  target.click();
+  return true;
+}
+
 function clickButtonContaining(text) {
   const target = findButtonContaining(text);
   if (!target) return false;
@@ -1699,7 +1712,18 @@ async function createContinuationSession(state) {
   if (state.lastActionAt && Date.now() - state.lastActionAt < 2000) return;
   const composer = findComposer();
   if (!composer) {
-    setTimeout(() => createContinuationSession(state).catch((error) => setToolbarStatus(error.message, true)), 800);
+    const onboardingAttempts = (state.onboardingAttempts || 0) + 1;
+    const onboardingStartedAt = state.onboardingStartedAt || Date.now();
+    if (onboardingAttempts >= 40 || Date.now() - onboardingStartedAt >= 30000) {
+      await abortAutoSwitch("新账号引导未自动完成，请手动点掉引导后重试");
+      return;
+    }
+    advanceOnboarding();
+    setTimeout(() => createContinuationSession({
+      ...state,
+      onboardingAttempts,
+      onboardingStartedAt
+    }).catch((error) => setToolbarStatus(error.message, true)), 800);
     return;
   }
   const stored = await storageGet([
