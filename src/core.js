@@ -1206,6 +1206,18 @@ function jwtEmail(token) {
   }
 }
 
+function jwtUserId(token) {
+  try {
+    const parts = String(token || "").split(".");
+    if (parts.length < 2) return "";
+    const payload = JSON.parse(decodeBase64Url(parts[1]));
+    return String(payload.sub || payload.user_id || payload.uid || payload.userId
+      || payload.user?.id || payload.user?.user_id || "");
+  } catch {
+    return "";
+  }
+}
+
 function pickEmail(data) {
   if (!data || typeof data !== "object") return "";
   return data.email || data.user_email || data.emailAddress
@@ -1280,35 +1292,42 @@ function matchSavedAccountEmail(orgId, userId) {
 }
 
 let currentEmailCache = "";
+let currentEmailCacheToken = "";
 async function resolveCurrentAccountEmail() {
-  const local = currentAccountEmail();
-  if (local) {
-    currentEmailCache = local;
-    return local;
-  }
   let authSession = null;
   try {
     authSession = readAuthSession();
   } catch {
-    return currentEmailCache;
+    currentEmailCache = "";
+    currentEmailCacheToken = "";
+    return "";
+  }
+  if (authSession.token !== currentEmailCacheToken) {
+    currentEmailCache = "";
+    currentEmailCacheToken = authSession.token;
   }
   const tokenEmail = jwtEmail(authSession.token);
   if (tokenEmail) {
     currentEmailCache = tokenEmail;
     return tokenEmail;
   }
-  const cachedEmail = scanLocalStorageEmail();
-  if (cachedEmail) {
-    currentEmailCache = cachedEmail;
-    return cachedEmail;
-  }
+  const userId = jwtUserId(authSession.token) || currentUserId(authSession);
   let orgId = "";
   try {
     ({ orgId } = await resolveBillingOrg());
   } catch {
     orgId = "";
   }
-  const userId = currentUserId(authSession);
+  const matched = matchSavedAccountEmail(orgId, userId);
+  if (matched) {
+    currentEmailCache = matched;
+    return matched;
+  }
+  const local = currentAccountEmail();
+  if (local) {
+    currentEmailCache = local;
+    return local;
+  }
   const headers = { Authorization: `Bearer ${authSession.token}`, accept: "application/json" };
   if (orgId) headers["x-cog-org-id"] = orgId;
   const endpoints = [];
@@ -1341,12 +1360,12 @@ async function resolveCurrentAccountEmail() {
       }
     }
   } catch {
-    // Fall through to saved-account matching.
+    // Fall through to localStorage scanning.
   }
-  const matched = matchSavedAccountEmail(orgId, userId);
-  if (matched) {
-    currentEmailCache = matched;
-    return matched;
+  const cachedEmail = scanLocalStorageEmail();
+  if (cachedEmail) {
+    currentEmailCache = cachedEmail;
+    return cachedEmail;
   }
   return currentEmailCache;
 }
@@ -2782,10 +2801,10 @@ async function refreshBalanceDisplay() {
 
 async function refreshCurrentAccount() {
   const [email, info] = await Promise.all([
-    resolveCurrentAccountEmail().catch(() => currentEmailCache),
+    resolveCurrentAccountEmail().catch(() => ""),
     fetchBillingInfo().catch(() => null)
   ]);
-  currentEmailCache = email || currentEmailCache;
+  currentEmailCache = email || "";
   if (info) currentBalanceInfo = info;
   emit();
 }
