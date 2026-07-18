@@ -2434,6 +2434,10 @@ function accountEditText(account) {
   return parts.join("---");
 }
 
+function exportAccounts(accounts = accountDraft) {
+  return (Array.isArray(accounts) ? accounts : []).map(accountEditText).join("\n");
+}
+
 async function toggleAccountArchive(index) {
   const account = accountDraft[index];
   if (!account) return;
@@ -2868,6 +2872,8 @@ export {
   moveAccount,
   toggleAccountArchive,
   accountEditText,
+  exportAccounts,
+  copyToClipboard,
   toggleAccountSessions,
   openLatestSession,
   openIsolatedSession,

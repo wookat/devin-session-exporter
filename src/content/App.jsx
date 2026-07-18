@@ -19,6 +19,11 @@ function downloadText(filename, text) {
   link.click();
 }
 
+function accountExportFilename(email) {
+  const safeEmail = String(email || "account").replace(/[^a-zA-Z0-9._-]+/g, "_");
+  return `devin-account-${safeEmail || "account"}-${core.fileDateStamp()}.txt`;
+}
+
 function reportError(error) {
   core.setToolbarStatus(error?.message || String(error) || "操作失败", true);
 }
@@ -290,6 +295,32 @@ function AccountRow({ account, index, total, onEdit }) {
               <button
                 type="button"
                 role="menuitem"
+                onClick={async () => {
+                  setMenuOpen(false);
+                  try {
+                    const ok = await core.copyToClipboard(core.accountEditText(account));
+                    core.setToolbarStatus(ok ? "已复制账密" : "复制失败，请手动复制", !ok);
+                  } catch (error) {
+                    reportError(error);
+                  }
+                }}
+              >
+                <span aria-hidden="true">⧉</span> 复制账密
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  downloadText(accountExportFilename(account.email), core.accountEditText(account));
+                  core.setToolbarStatus("已导出账号");
+                }}
+              >
+                <span aria-hidden="true">⇩</span> 导出此账号
+              </button>
+              <button
+                type="button"
+                role="menuitem"
                 onClick={() => {
                   setMenuOpen(false);
                   onEdit(core.accountEditText(account));
@@ -332,6 +363,16 @@ function AccountList({ onEdit }) {
   const accounts = core.getAccounts();
   const total = accounts.length;
   const selectedCount = core.getSelectedCount();
+  const exportSelectedOrAll = () => {
+    const selectedAccounts = selectedCount
+      ? accounts.filter((account) => core.isAccountSelected(core.accountKey(account)))
+      : accounts;
+    downloadText(
+      `devin-accounts-${core.fileDateStamp()}.txt`,
+      core.exportAccounts(selectedAccounts)
+    );
+    core.setToolbarStatus(selectedCount ? `已导出 ${selectedCount} 个账号` : `已导出 ${total} 个账号`);
+  };
   if (!total) {
     return (
       <div id="devin-account-list">
@@ -365,6 +406,9 @@ function AccountList({ onEdit }) {
           onClick={() => core.deleteSelectedAccounts().catch(reportError)}
         >
           删除选中
+        </button>
+        <button type="button" onClick={exportSelectedOrAll}>
+          {selectedCount ? "导出选中账号" : "导出全部账号"}
         </button>
       </div>
       {accounts.map((account, index) => (
