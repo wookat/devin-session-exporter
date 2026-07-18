@@ -456,7 +456,7 @@ async function fetchSessionsForCredentials(email, password) {
   return { auth, sessions };
 }
 
-async function exportListedSessionHandoff(session, auth) {
+async function exportListedSessionHandoff(session, auth, options = {}) {
   const events = await fetchAllEvents(session.devinId, auth.token, auth.orgId);
   const data = {
     sessionId: session.sessionId,
@@ -467,7 +467,7 @@ async function exportListedSessionHandoff(session, auth) {
     messages: await inlineAttachments(buildMessages(events, {}), auth.token, auth.orgId),
     worklog: buildWorklog(events)
   };
-  return buildHandoff(data, { includeFullConversation: false });
+  return buildHandoff(data, { includeFullConversation: options.includeFullConversation === true });
 }
 
 function buildVauthPayload(auth) {
@@ -2455,6 +2455,40 @@ async function exportSessionHandoff(session, auth) {
   return text;
 }
 
+async function shareSession(session, auth) {
+  const stored = await storageGet(["shareServiceUrl"]);
+  const serviceUrl = String(stored.shareServiceUrl || "").trim().replace(/\/+$/, "");
+  if (!serviceUrl) {
+    setToolbarStatus("请先在设置中配置分享服务地址", true);
+    return "";
+  }
+  setToolbarStatus(`正在生成分享链接：${session.title}…`);
+  const content = await exportListedSessionHandoff(session, auth, { includeFullConversation: true });
+  const response = await fetch(`${serviceUrl}/share`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "omit",
+    body: JSON.stringify({
+      content,
+      title: session.title || "Devin session"
+    })
+  });
+  if (!response.ok) {
+    throw new Error(`生成分享链接失败（HTTP ${response.status}）`);
+  }
+  const payload = await response.json();
+  if (!payload?.url || typeof payload.url !== "string") {
+    throw new Error("分享服务返回了无效链接");
+  }
+  const copied = await copyToClipboard(payload.url);
+  if (!copied) {
+    setToolbarStatus("分享链接已生成，但复制失败，请手动复制", true);
+    return payload.url;
+  }
+  setToolbarStatus("已复制分享链接（内容为当前快照）");
+  return payload.url;
+}
+
 function formatLatestSession(info) {
   if (!info) return "最新会话：—";
   if (info.loading) return "最新会话：查询中…";
@@ -2653,6 +2687,9 @@ async function saveSettings(settings = {}) {
     targetUsageLimit,
     switchMinBalance,
     theme: settings.theme === "dark" ? "dark" : "light",
+    shareServiceUrl: typeof settings.shareServiceUrl === "string"
+      ? settings.shareServiceUrl.trim()
+      : "",
     continuationTemplate: typeof settings.continuationTemplate === "string"
       ? settings.continuationTemplate
       : DEFAULT_HANDOFF_TEMPLATE
@@ -2688,7 +2725,8 @@ async function loadSettingsState() {
     "targetUsageLimit",
     "switchMinBalance",
     "continuationTemplate",
-    "theme"
+    "theme",
+    "shareServiceUrl"
   ]);
   currentTheme = values.theme === "dark" ? "dark" : "light";
   try {
@@ -2716,7 +2754,8 @@ async function loadSettingsState() {
         : DEFAULT_TARGET_USAGE_LIMIT,
       switchMinBalance: Number.isFinite(Number(values.switchMinBalance))
         ? Number(values.switchMinBalance)
-        : DEFAULT_SWITCH_MIN_BALANCE
+        : DEFAULT_SWITCH_MIN_BALANCE,
+      shareServiceUrl: typeof values.shareServiceUrl === "string" ? values.shareServiceUrl : ""
     },
     template: values.continuationTemplate || DEFAULT_HANDOFF_TEMPLATE
   };
@@ -3016,6 +3055,7 @@ export {
   copyContinuationToClipboard,
   continueFromClipboard,
   exportSessionHandoff,
+  shareSession,
   refreshBalanceDisplay,
   refreshCurrentAccount,
   refreshAccountMeta,
