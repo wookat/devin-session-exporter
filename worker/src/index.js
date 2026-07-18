@@ -292,16 +292,26 @@ async function fetchAttachmentCookie(token, orgId) {
   return "";
 }
 
-async function fetchAttachmentText(relativePath, cookie) {
-  if (!cookie) return null;
-  const response = await fetch(`${DEVIN_ORIGIN}/attachments/${relativePath}`, {
-    headers: { cookie }
-  });
-  if (!response.ok) return null;
-  const text = await response.text();
-  return text.length > MAX_INLINE_ATTACHMENT_BYTES
-    ? `${text.slice(0, MAX_INLINE_ATTACHMENT_BYTES)}\n…（已截断）`
-    : text;
+// Fetches an attachment once with the share cookie. Returns the upstream status
+// plus (optionally) the decoded text, so the renderer can distinguish
+// "accessible" (200), "forbidden for this account" (401/403), and "other".
+async function fetchAttachmentProbe(relativePath, cookie, wantText) {
+  if (!cookie) return { status: 0, text: null };
+  let response;
+  try {
+    response = await fetch(`${DEVIN_ORIGIN}/attachments/${relativePath}`, { headers: { cookie } });
+  } catch {
+    return { status: 0, text: null };
+  }
+  if (!response.ok || !wantText) {
+    try { await response.body?.cancel?.(); } catch { /* ignore */ }
+    return { status: response.status, text: null };
+  }
+  const raw = await response.text();
+  const text = raw.length > MAX_INLINE_ATTACHMENT_BYTES
+    ? `${raw.slice(0, MAX_INLINE_ATTACHMENT_BYTES)}\n…（已截断）`
+    : raw;
+  return { status: response.status, text };
 }
 
 // Rewrites attachment references so a reader without the owner account can still
@@ -330,18 +340,23 @@ async function rewriteAttachments(value, ctx, depth = 0) {
   const bareUrls = text.match(ATTACHMENT_URL_RE) || [];
   for (const url of bareUrls) collect(url, NaN);
 
+  const cookie = await ctx.cookie();
   const replacements = new Map();
   for (const [relativePath, info] of seen) {
     const name = attachmentName(relativePath);
     const proxied = proxiedAttachmentUrl(ctx.workerOrigin, ctx.shareId, relativePath);
+    const isImage = IMAGE_ATTACHMENT_EXT.test(name);
+    const wantText = inlineText && TEXT_ATTACHMENT_EXT.test(name)
+      && (!Number.isFinite(info.fileSize) || info.fileSize <= MAX_INLINE_ATTACHMENT_BYTES);
+    const { status, text: body } = await fetchAttachmentProbe(relativePath, cookie, wantText);
     let rendered;
-    if (inlineText && TEXT_ATTACHMENT_EXT.test(name)
-      && (!Number.isFinite(info.fileSize) || info.fileSize <= MAX_INLINE_ATTACHMENT_BYTES)) {
-      const content = await fetchAttachmentText(relativePath, await ctx.cookie());
-      rendered = content != null
-        ? `\n\n<附件 ${name}>\n${(await rewriteAttachments(content, ctx, depth + 1)).trim()}\n</附件 ${name}>\n`
-        : `[附件 ${name}](${proxied})`;
-    } else if (IMAGE_ATTACHMENT_EXT.test(name)) {
+    if (status === 401 || status === 403) {
+      // The sharing account itself has no access (e.g. the file was uploaded by
+      // another account, common with pasted handoff docs) — no proxy can fix that.
+      rendered = `（附件 ${name}：由其他账号上传，此分享账号无权读取）`;
+    } else if (wantText && body != null) {
+      rendered = `\n\n<附件 ${name}>\n${(await rewriteAttachments(body, ctx, depth + 1)).trim()}\n</附件 ${name}>\n`;
+    } else if (isImage) {
       rendered = `![${name}](${proxied})`;
     } else {
       rendered = `[附件 ${name}](${proxied})`;
