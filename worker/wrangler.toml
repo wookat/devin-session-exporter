@@ -8,3 +8,5 @@ id = "9d01e1791dbd4594bc2603e7cee5ccde"
 
 [vars]
 SHARE_TTL_SECONDS = "86400"
+
+# Required secret; set with: wrangler secret put SHARE_KEY
