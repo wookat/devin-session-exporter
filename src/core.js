@@ -960,6 +960,7 @@ function routeAutoSwitch(currentUrl, state = {}, signals = {}) {
 const extensionApi = globalThis.browser ?? globalThis.chrome;
 const DEFAULT_TARGET_USAGE_LIMIT = 200;
 const DEFAULT_SWITCH_MIN_BALANCE = 65;
+const DEFAULT_SHARE_SERVICE_URL = "https://devin-session-share.wookat520.workers.dev";
 const AUTO_SWITCH_KEYS = [
   "managedAccounts",
   "accountVault",
@@ -2457,7 +2458,9 @@ async function exportSessionHandoff(session, auth) {
 
 async function shareSession(session, auth) {
   const stored = await storageGet(["shareServiceUrl"]);
-  const serviceUrl = String(stored.shareServiceUrl || "").trim().replace(/\/+$/, "");
+  const serviceUrl = String(
+    stored.shareServiceUrl || DEFAULT_SHARE_SERVICE_URL
+  ).trim().replace(/\/+$/, "");
   if (!serviceUrl) {
     setToolbarStatus("请先在设置中配置分享服务地址", true);
     return "";
@@ -2687,9 +2690,9 @@ async function saveSettings(settings = {}) {
     targetUsageLimit,
     switchMinBalance,
     theme: settings.theme === "dark" ? "dark" : "light",
-    shareServiceUrl: typeof settings.shareServiceUrl === "string"
+    shareServiceUrl: typeof settings.shareServiceUrl === "string" && settings.shareServiceUrl.trim()
       ? settings.shareServiceUrl.trim()
-      : "",
+      : DEFAULT_SHARE_SERVICE_URL,
     continuationTemplate: typeof settings.continuationTemplate === "string"
       ? settings.continuationTemplate
       : DEFAULT_HANDOFF_TEMPLATE
@@ -2755,7 +2758,9 @@ async function loadSettingsState() {
       switchMinBalance: Number.isFinite(Number(values.switchMinBalance))
         ? Number(values.switchMinBalance)
         : DEFAULT_SWITCH_MIN_BALANCE,
-      shareServiceUrl: typeof values.shareServiceUrl === "string" ? values.shareServiceUrl : ""
+      shareServiceUrl: typeof values.shareServiceUrl === "string" && values.shareServiceUrl.trim()
+        ? values.shareServiceUrl
+        : DEFAULT_SHARE_SERVICE_URL
     },
     template: values.continuationTemplate || DEFAULT_HANDOFF_TEMPLATE
   };
@@ -3024,6 +3029,7 @@ export {
   DEFAULT_HANDOFF_TEMPLATE,
   DEFAULT_TARGET_USAGE_LIMIT,
   DEFAULT_SWITCH_MIN_BALANCE,
+  DEFAULT_SHARE_SERVICE_URL,
   UPDATE_CHECK_INTERVAL_MS,
   // Store.
   subscribe,
