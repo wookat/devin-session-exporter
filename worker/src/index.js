@@ -280,6 +280,16 @@ function renderWorklog(events) {
           lines.push({ text: `- 搜索 ${search?.regex || ""} 于 ${search?.path || "unknown path"}` });
         }
         break;
+      case "devin_thoughts":
+        if (typeof event.message === "string" && event.message.trim()) {
+          lines.push({ text: `- 思考：${truncateOutput(event.message, 600)}` });
+        }
+        break;
+      case "status_update":
+        if (typeof event.message === "string" && event.message.trim()) {
+          lines.push({ text: `- 状态：${truncateOutput(event.message, 300)}` });
+        }
+        break;
       default:
         break;
     }
@@ -316,7 +326,7 @@ function renderMarkdown(metadata, events) {
   lines.push("## Conversation", "");
   const messages = events
     .map((event, index) => ({ event, index }))
-    .filter(({ event }) => ["user_message", "devin_message", "user_question_answered"].includes(event?.type))
+    .filter(({ event }) => ["initial_user_message", "user_message", "devin_message", "user_question_answered"].includes(event?.type))
     .map(({ event, index }) => ({
       index,
       createdAt: Number(event.created_at_ms),
@@ -331,6 +341,15 @@ function renderMarkdown(metadata, events) {
     ));
   for (const message of messages) {
     lines.push(`### ${message.role}`, "", message.text, "");
+  }
+  const latestTodos = sortedByTime(events).reverse()
+    .find((event) => event?.type === "todo_update" && Array.isArray(event.todos) && event.todos.length);
+  if (latestTodos) {
+    lines.push("## Todos（最新状态）", "");
+    for (const todo of latestTodos.todos) {
+      lines.push(`- ${todo?.status === "completed" ? "[x]" : "[ ]"} ${String(todo?.content || "").trim()}`);
+    }
+    lines.push("");
   }
   const worklog = renderWorklog(events);
   if (worklog.length) {
