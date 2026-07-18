@@ -85,12 +85,19 @@
 }
 
 #devin-exporter-settings {
-  right: var(--devin-space-3);
+  --devin-space-2: 6px;
+  --devin-space-3: 9px;
+  --devin-space-4: 12px;
+  --devin-control-height: 24px;
+
+  right: 12px;
   bottom: 58px;
-  width: min(430px, calc(100vw - 24px));
+  width: min(400px, calc(100vw - 24px));
   max-height: 84vh;
   overflow: auto;
   padding: var(--devin-space-3);
+  font-size: 11px;
+  line-height: 1.3;
   border: 1px solid var(--devin-border);
   border-radius: var(--devin-radius-lg);
   background: var(--devin-panel-bg);
@@ -240,15 +247,15 @@
 #devin-exporter-settings h2 {
   margin: 0;
   color: var(--devin-text);
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 650;
   letter-spacing: -.01em;
 }
 
 #devin-exporter-settings h3 {
-  margin: 0 0 var(--devin-space-2);
+  margin: 0 0 var(--devin-space-1);
   color: var(--devin-text-secondary);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 650;
   letter-spacing: .08em;
   text-transform: uppercase;
