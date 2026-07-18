@@ -2509,6 +2509,7 @@ async function saveSettings(settings = {}) {
     autoSendContinuation: settings.autoSendContinuation !== false,
     targetUsageLimit,
     switchMinBalance,
+    theme: settings.theme === "dark" ? "dark" : "light",
     continuationTemplate: typeof settings.continuationTemplate === "string"
       ? settings.continuationTemplate
       : DEFAULT_HANDOFF_TEMPLATE
@@ -2543,8 +2544,15 @@ async function loadSettingsState() {
     "autoSendContinuation",
     "targetUsageLimit",
     "switchMinBalance",
-    "continuationTemplate"
+    "continuationTemplate",
+    "theme"
   ]);
+  currentTheme = values.theme === "dark" ? "dark" : "light";
+  try {
+    globalThis.localStorage?.setItem("devin-exporter-theme", currentTheme);
+  } catch {
+    // Keep the in-memory default when localStorage is unavailable.
+  }
   encryptionEnabled = values.accountEncryptionEnabled === true;
   selectedAccountKeys.clear();
   await Promise.all([loadPersistedBalances(), loadPersistedLatestSessions(), loadPromptSnippets()]);
@@ -2556,6 +2564,7 @@ async function loadSettingsState() {
     .catch((error) => setToolbarStatus(error.message, true));
   return {
     settings: {
+      theme: currentTheme,
       encryptionEnabled,
       autoSwitchEnabled: values.autoSwitchEnabled === true,
       autoSendContinuation: values.autoSendContinuation !== false,
@@ -2646,6 +2655,15 @@ let statusIsError = false;
 let currentPhase = "idle";
 let currentBalanceInfo = null;
 let encryptionEnabled = false;
+function readCachedTheme() {
+  try {
+    return globalThis.localStorage?.getItem("devin-exporter-theme") === "dark" ? "dark" : "light";
+  } catch {
+    return "light";
+  }
+}
+
+let currentTheme = readCachedTheme();
 let storeRevision = 0;
 const storeListeners = new Set();
 
@@ -2699,6 +2717,22 @@ function getSnippets() {
 
 function getEncryptionEnabled() {
   return encryptionEnabled;
+}
+
+function getTheme() {
+  return currentTheme;
+}
+
+function setTheme(value) {
+  currentTheme = value === "dark" ? "dark" : "light";
+  try {
+    globalThis.localStorage?.setItem("devin-exporter-theme", currentTheme);
+  } catch {
+    // The extension storage value remains authoritative if localStorage is unavailable.
+  }
+  storageSet({ theme: currentTheme }).catch(() => {});
+  emit();
+  return currentTheme;
 }
 
 function isAccountSelected(key) {
@@ -2799,6 +2833,7 @@ export {
   getAccounts,
   getSnippets,
   getEncryptionEnabled,
+  getTheme,
   isAccountSelected,
   getSelectedCount,
   getBalanceInfo,
@@ -2822,6 +2857,7 @@ export {
   loadSettingsState,
   saveSettings,
   setEncryptionEnabled,
+  setTheme,
   applyTargetUsageLimit,
   addBatchAccounts,
   deleteAccount,
