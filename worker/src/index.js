@@ -6,6 +6,13 @@ const SHARE_ID_BYTES = 16;
 const IV_BYTES = 12;
 const encoder = new TextEncoder();
 
+const ATTACHMENT_MARKER_RE = /ATTACHMENT:(\{[^\n]*?\}|"[^"\n]*"|https?:\/\/\S+)/g;
+const ATTACHMENT_URL_RE = /https?:\/\/[^\s"'<>()]+\/attachments\/[A-Za-z0-9-]+\/[^\s"'<>()]+/g;
+const ATTACHMENT_PATH_RE = /\/attachments\/([A-Za-z0-9-]+\/[^\s"'<>()?#]+)/;
+const TEXT_ATTACHMENT_EXT = /\.(?:md|markdown|txt|text|json|log|csv|tsv|ya?ml|diff|patch|xml|html?)(?:\?|$)/i;
+const IMAGE_ATTACHMENT_EXT = /\.(?:png|jpe?g|gif|webp|bmp|svg)(?:\?|$)/i;
+const MAX_INLINE_ATTACHMENT_BYTES = 100 * 1024;
+
 function corsHeaders(origin) {
   if (origin !== ALLOWED_ORIGIN) return {};
   return {
@@ -227,6 +234,148 @@ function eventText(event) {
   return "";
 }
 
+function parseAttachmentMarker(marker) {
+  const payload = String(marker).slice("ATTACHMENT:".length).trim();
+  if (payload.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(payload);
+      return { url: String(parsed.url || ""), fileSize: Number(parsed.fileSize) };
+    } catch {
+      return { url: "", fileSize: NaN };
+    }
+  }
+  if (payload.startsWith("\"")) {
+    try {
+      return { url: String(JSON.parse(payload) || ""), fileSize: NaN };
+    } catch {
+      return { url: "", fileSize: NaN };
+    }
+  }
+  return { url: payload, fileSize: NaN };
+}
+
+function attachmentName(url) {
+  try {
+    const last = String(url).split("/").pop().split("?")[0];
+    return decodeURIComponent(last) || "attachment";
+  } catch {
+    return "attachment";
+  }
+}
+
+function attachmentRelativePath(url) {
+  const match = ATTACHMENT_PATH_RE.exec(String(url || ""));
+  return match ? match[1] : "";
+}
+
+function proxiedAttachmentUrl(workerOrigin, shareId, relativePath) {
+  const encoded = relativePath.split("/").map(encodeURIComponent).join("/");
+  return `${workerOrigin}/a/${shareId}/${encoded}`;
+}
+
+async function fetchAttachmentCookie(token, orgId) {
+  const response = await fetch(`${DEVIN_ORIGIN}/api/users/set-attachment-cookie`, {
+    method: "POST",
+    headers: { ...apiHeaders(token, orgId), "content-type": "application/json" },
+    body: "{}"
+  });
+  if (!response.ok) return "";
+  const cookies = typeof response.headers.getSetCookie === "function"
+    ? response.headers.getSetCookie()
+    : [response.headers.get("set-cookie") || ""];
+  for (const cookie of cookies) {
+    const match = /attachments_token=([^;,\s]+)/.exec(cookie || "");
+    if (match && match[1] && match[1] !== "\"\"" && match[1].length > 4) {
+      return `attachments_token=${match[1]}`;
+    }
+  }
+  return "";
+}
+
+// Fetches an attachment once with the share cookie. Returns the upstream status
+// plus (optionally) the decoded text, so the renderer can distinguish
+// "accessible" (200), "forbidden for this account" (401/403), and "other".
+async function fetchAttachmentProbe(relativePath, cookie, wantText) {
+  if (!cookie) return { status: 0, text: null };
+  let response;
+  try {
+    response = await fetch(`${DEVIN_ORIGIN}/attachments/${relativePath}`, { headers: { cookie } });
+  } catch {
+    return { status: 0, text: null };
+  }
+  if (!response.ok || !wantText) {
+    try { await response.body?.cancel?.(); } catch { /* ignore */ }
+    return { status: response.status, text: null };
+  }
+  const raw = await response.text();
+  const text = raw.length > MAX_INLINE_ATTACHMENT_BYTES
+    ? `${raw.slice(0, MAX_INLINE_ATTACHMENT_BYTES)}\n…（已截断）`
+    : raw;
+  return { status: response.status, text };
+}
+
+// Rewrites attachment references so a reader without the owner account can still
+// read them: text files are inlined, images/binaries become links proxied through
+// this Worker (which re-authenticates upstream with the shared account token).
+// Inlined text is itself rewritten (depth-bounded) so attachment markers embedded
+// inside a handoff document are also converted instead of left as 401 URLs.
+async function rewriteAttachments(value, ctx, depth = 0) {
+  let text = String(value || "");
+  if (!text) return text;
+  const inlineText = depth < 1;
+  const seen = new Map();
+  const collect = (rawUrl, fileSize) => {
+    const relativePath = attachmentRelativePath(rawUrl);
+    if (!relativePath) return null;
+    if (!seen.has(relativePath)) seen.set(relativePath, { rawUrl, fileSize });
+    return relativePath;
+  };
+  const markers = text.match(ATTACHMENT_MARKER_RE) || [];
+  const markerInfo = new Map();
+  for (const marker of markers) {
+    const { url, fileSize } = parseAttachmentMarker(marker);
+    const relativePath = url ? collect(url, fileSize) : null;
+    markerInfo.set(marker, relativePath);
+  }
+  const bareUrls = text.match(ATTACHMENT_URL_RE) || [];
+  for (const url of bareUrls) collect(url, NaN);
+
+  const cookie = await ctx.cookie();
+  const replacements = new Map();
+  for (const [relativePath, info] of seen) {
+    const name = attachmentName(relativePath);
+    const proxied = proxiedAttachmentUrl(ctx.workerOrigin, ctx.shareId, relativePath);
+    const isImage = IMAGE_ATTACHMENT_EXT.test(name);
+    const wantText = inlineText && TEXT_ATTACHMENT_EXT.test(name)
+      && (!Number.isFinite(info.fileSize) || info.fileSize <= MAX_INLINE_ATTACHMENT_BYTES);
+    const { status, text: body } = await fetchAttachmentProbe(relativePath, cookie, wantText);
+    let rendered;
+    if (status === 401 || status === 403) {
+      // The sharing account itself has no access (e.g. the file was uploaded by
+      // another account, common with pasted handoff docs) — no proxy can fix that.
+      rendered = `（附件 ${name}：由其他账号上传，此分享账号无权读取）`;
+    } else if (wantText && body != null) {
+      rendered = `\n\n<附件 ${name}>\n${(await rewriteAttachments(body, ctx, depth + 1)).trim()}\n</附件 ${name}>\n`;
+    } else if (isImage) {
+      rendered = `![${name}](${proxied})`;
+    } else {
+      rendered = `[附件 ${name}](${proxied})`;
+    }
+    replacements.set(relativePath, rendered);
+  }
+
+  for (const [marker, relativePath] of markerInfo) {
+    text = text.split(marker).join(relativePath ? replacements.get(relativePath) : "");
+  }
+  for (const url of bareUrls) {
+    const relativePath = attachmentRelativePath(url);
+    if (relativePath && replacements.has(relativePath)) {
+      text = text.split(url).join(replacements.get(relativePath));
+    }
+  }
+  return text.replace(/\n{3,}/g, "\n\n").trim();
+}
+
 function truncateOutput(value, maxLength = 400) {
   const text = String(value || "").trim();
   if (!text) return "";
@@ -316,7 +465,7 @@ function renderPullRequests(metadata) {
     .filter(Boolean);
 }
 
-function renderMarkdown(metadata, events) {
+async function renderMarkdown(metadata, events, attachmentCtx) {
   const title = String(metadata?.title || "Devin session").trim();
   const lines = [`# ${title}`, ""];
   const pulls = renderPullRequests(metadata);
@@ -340,7 +489,8 @@ function renderMarkdown(metadata, events) {
       || left.index - right.index
     ));
   for (const message of messages) {
-    lines.push(`### ${message.role}`, "", message.text, "");
+    const text = attachmentCtx ? await rewriteAttachments(message.text, attachmentCtx) : message.text;
+    lines.push(`### ${message.role}`, "", text, "");
   }
   const latestTodos = sortedByTime(events).reverse()
     .find((event) => event?.type === "todo_update" && Array.isArray(event.todos) && event.todos.length);
@@ -358,19 +508,26 @@ function renderMarkdown(metadata, events) {
   return `${lines.join("\n").trimEnd()}\n`;
 }
 
-async function readShare(id, env) {
-  if (!validShareId(id)) return textResponse("Not found", 404);
+async function loadShare(id, env) {
+  if (!validShareId(id)) return null;
   const stored = await env.SHARES.get(id, "json");
-  if (!stored?.iv || !stored?.ciphertext) return textResponse("Not found", 404);
+  if (!stored?.iv || !stored?.ciphertext) return null;
   let share;
   try {
     share = await decryptShare(stored, env);
   } catch {
-    return textResponse("Share expired or unavailable", 410);
+    return null;
   }
-  if (!share?.token || !share?.orgId || !share?.devinId) {
-    return textResponse("Share expired or unavailable", 410);
-  }
+  if (!share?.token || !share?.orgId || !share?.devinId) return null;
+  return share;
+}
+
+async function readShare(id, env, workerOrigin) {
+  if (!validShareId(id)) return textResponse("Not found", 404);
+  const stored = await env.SHARES.get(id, "json");
+  if (!stored?.iv || !stored?.ciphertext) return textResponse("Not found", 404);
+  const share = await loadShare(id, env);
+  if (!share) return textResponse("Share expired or unavailable", 410);
   try {
     const metadata = await fetchDevinJson(
       `/api/sessions/${encodeURIComponent(share.devinId)}`,
@@ -378,7 +535,17 @@ async function readShare(id, env) {
       share.orgId
     );
     const events = await fetchSessionEvents(share.devinId, share.token, share.orgId);
-    return new Response(renderMarkdown(metadata, events), {
+    let cookiePromise;
+    const attachmentCtx = {
+      shareId: id,
+      workerOrigin,
+      cookie: () => {
+        if (!cookiePromise) cookiePromise = fetchAttachmentCookie(share.token, share.orgId);
+        return cookiePromise;
+      }
+    };
+    const markdown = await renderMarkdown(metadata, events, attachmentCtx);
+    return new Response(markdown, {
       status: 200,
       headers: {
         "content-type": "text/markdown; charset=utf-8",
@@ -390,6 +557,34 @@ async function readShare(id, env) {
       return textResponse(error.message, 410);
     }
     return textResponse("Unable to read the live Devin session", 502);
+  }
+}
+
+async function proxyAttachment(id, relativePath, env) {
+  if (!validShareId(id)) return textResponse("Not found", 404);
+  if (!/^[A-Za-z0-9-]+\/[^\s]+$/.test(relativePath) || relativePath.includes("..")) {
+    return textResponse("Not found", 404);
+  }
+  const share = await loadShare(id, env);
+  if (!share) return textResponse("Share expired or unavailable", 410);
+  try {
+    const cookie = await fetchAttachmentCookie(share.token, share.orgId);
+    if (!cookie) return textResponse("Share expired: unable to authenticate attachment", 410);
+    const upstream = await fetch(`${DEVIN_ORIGIN}/attachments/${relativePath}`, {
+      headers: { cookie }
+    });
+    if (upstream.status === 401 || upstream.status === 403) {
+      return textResponse("Attachment not accessible for this share", 403);
+    }
+    if (!upstream.ok) return textResponse("Attachment unavailable", 502);
+    const headers = new Headers();
+    const contentType = upstream.headers.get("content-type");
+    if (contentType) headers.set("content-type", contentType);
+    headers.set("cache-control", "private, max-age=300");
+    headers.set("content-disposition", "inline");
+    return new Response(upstream.body, { status: 200, headers });
+  } catch {
+    return textResponse("Attachment unavailable", 502);
   }
 }
 
@@ -413,9 +608,21 @@ export default {
     if (url.pathname === "/share" && request.method === "POST") {
       return createShare(request, env, origin);
     }
+    const attachment = url.pathname.match(/^\/a\/([a-f0-9]{32})\/(.+)$/i);
+    if (attachment && request.method === "GET") {
+      return proxyAttachment(attachment[1], decodeURIComponent(attachment[2]), env);
+    }
     const match = url.pathname.match(/^\/s\/([^/]+)$/);
-    if (match && request.method === "GET") return readShare(match[1], env);
+    if (match && request.method === "GET") return readShare(match[1], env, url.origin);
     if (match && request.method === "DELETE") return deleteShare(match[1], env, origin);
     return textResponse("Not found", 404);
   }
+};
+
+export {
+  parseAttachmentMarker,
+  attachmentName,
+  attachmentRelativePath,
+  proxiedAttachmentUrl,
+  rewriteAttachments
 };
