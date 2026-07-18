@@ -228,6 +228,7 @@ function collectOrgIds(authSession) {
     }
   };
 
+  addOrgId(authSession?.orgId);
   const userId = authSession.userId
     || authSession.uid
     || authSession.user_id
@@ -416,6 +417,13 @@ function normalizeSessionRecord(record) {
   };
 }
 
+function parseDevinSessionUrl(value) {
+  const match = String(value || "").match(
+    /https:\/\/app\.devin\.ai\/sessions\/([A-Za-z0-9_-]+)/i
+  );
+  return match ? match[1].replace(/^devin-/i, "") : "";
+}
+
 async function fetchSessionsForToken(token, orgId, limit = 200) {
   const headers = { ...apiHeaders(token, orgId) };
   const pickArray = (payload) => {
@@ -511,7 +519,8 @@ async function setUsageLimit(dollars, context) {
 async function fetchSessionData(devinId, token, orgIds) {
   for (const orgId of orgIds) {
     const response = await fetch(`/api/sessions/${encodeURIComponent(devinId)}`, {
-      headers: apiHeaders(token, orgId)
+      headers: apiHeaders(token, orgId),
+      credentials: "omit"
     });
     if (response.ok) {
       const metadata = await response.json();
@@ -531,7 +540,8 @@ async function fetchAllEvents(devinId, token, orgId) {
   for (let page = 0; page < 200; page += 1) {
     const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
     const response = await fetch(`/api/events/${encodeURIComponent(devinId)}${query}`, {
-      headers: apiHeaders(token, orgId)
+      headers: apiHeaders(token, orgId),
+      credentials: "omit"
     });
     if (!response.ok) {
       throw new Error(`Could not fetch Devin session events (HTTP ${response.status})`);
@@ -1775,6 +1785,33 @@ async function waitForComposerAfterOnboarding(timeout = 30000, interval = 800) {
   }, timeout, interval);
 }
 
+async function resolveLinkedSessionHandoff(sessionId) {
+  const accounts = await loadManagedAccounts();
+  const devinId = `devin-${sessionId}`;
+  for (const account of accounts) {
+    if (!account?.email || !String(account.password || "").trim()) continue;
+    try {
+      const auth = await resolveAccountAuth(account.email, account.password);
+      const { metadata, orgId } = await fetchSessionData(
+        devinId,
+        auth.token,
+        collectOrgIds(auth)
+      );
+      return await exportListedSessionHandoff(
+        {
+          devinId,
+          sessionId,
+          title: metadata.title || sessionId
+        },
+        { ...auth, orgId }
+      );
+    } catch {
+      // Try the next saved account without exposing credentials or tokens.
+    }
+  }
+  throw new Error("该会话所属账号未在本资料导入或无权限读取");
+}
+
 async function continueFromClipboard() {
   let text = "";
   try {
@@ -1786,6 +1823,21 @@ async function continueFromClipboard() {
   if (!text.trim()) {
     setToolbarStatus("剪贴板为空，未执行续接", true);
     return false;
+  }
+  const linkedSessionId = parseDevinSessionUrl(text);
+  if (linkedSessionId) {
+    setToolbarStatus("正在读取会话链接…");
+    try {
+      const handoff = await resolveLinkedSessionHandoff(linkedSessionId);
+      const stored = await storageGet(["continuationTemplate"]);
+      text = buildContinuationText(
+        stored.continuationTemplate || DEFAULT_HANDOFF_TEMPLATE,
+        handoff
+      );
+    } catch (error) {
+      setToolbarStatus(error.message || "读取会话链接失败", true);
+      return false;
+    }
   }
   setToolbarStatus("正在等待 Devin 输入框...");
   const composer = await waitForComposerAfterOnboarding();
