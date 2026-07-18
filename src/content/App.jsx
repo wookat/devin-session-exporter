@@ -70,10 +70,16 @@ function Toolbar({ onToggleSettings }) {
   );
 }
 
+function currentSessionTitle() {
+  if (!core.isSessionPage()) return "";
+  return String(document.title || "").replace(/\s*[|\-·]\s*Devin\s*$/i, "").trim();
+}
+
 function CurrentAccountCard() {
   useStore();
   const email = core.getCurrentEmail();
   const info = core.getCurrentBalanceInfo();
+  const sessionTitle = currentSessionTitle();
   return (
     <div id="devin-current-account" className="devin-current">
       <div className="devin-current-line">
@@ -95,9 +101,29 @@ function CurrentAccountCard() {
           {info ? core.formatBalanceDisplay(info) : "余额 — · 上限 —"}
         </span>
       </div>
+      {sessionTitle ? (
+        <div className="devin-current-session" title={sessionTitle}>
+          当前会话：{sessionTitle}
+        </div>
+      ) : null}
       <div className="devin-current-actions">
         <button type="button" onClick={() => core.beginAutoSwitch(true).catch(reportError)}>
           换到下一个号
+        </button>
+        <button
+          type="button"
+          disabled={!core.isSessionPage()}
+          onClick={async () => {
+            try {
+              const { data, compact, full } = await core.exportHandoff();
+              downloadText(`devin-handoff-${core.fileDateStamp()}.md`, full || compact);
+              core.setToolbarStatus(`已保存：${data.title || "Handoff"}`);
+            } catch (error) {
+              reportError(error);
+            }
+          }}
+        >
+          导出 Handoff
         </button>
       </div>
     </div>
@@ -206,6 +232,9 @@ function AccountRow({ account, index, total, onEdit }) {
         />
         <div className="devin-account-identity">
           <strong title={account.email}>{`${index + 1}. ${account.label || account.email}`}</strong>
+          {account.email && account.email === core.getCurrentEmail() ? (
+            <span className="devin-account-badge devin-account-badge-current">当前</span>
+          ) : null}
           {account.archived ? <span className="devin-account-badge">已归档</span> : null}
           {account.label && account.label !== account.email ? <span>{account.email}</span> : null}
         </div>
@@ -583,27 +612,6 @@ function SettingsPanel({ onClose }) {
       ) : null}
 
       <CurrentAccountCard />
-
-      <section className="devin-settings-section">
-        <h3>当前会话</h3>
-        <div className="devin-settings-actions">
-          <button
-            type="button"
-            disabled={!core.isSessionPage()}
-            onClick={async () => {
-              try {
-                const { data, compact, full } = await core.exportHandoff();
-                downloadText(`devin-handoff-${core.fileDateStamp()}.md`, full || compact);
-                core.setToolbarStatus(`已保存：${data.title || "Handoff"}`);
-              } catch (error) {
-                reportError(error);
-              }
-            }}
-          >
-            导出 Handoff 文档
-          </button>
-        </div>
-      </section>
 
       <section className="devin-settings-section">
         <div className="devin-field-row">

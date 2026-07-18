@@ -72,7 +72,7 @@
 
 #devin-exporter-toolbar {
   right: var(--devin-space-3);
-  top: 52px;
+  bottom: var(--devin-space-3);
   display: flex;
   align-items: center;
   gap: var(--devin-space-1);
@@ -86,9 +86,9 @@
 
 #devin-exporter-settings {
   right: var(--devin-space-3);
-  top: 96px;
+  bottom: 58px;
   width: min(430px, calc(100vw - 24px));
-  max-height: calc(100vh - 110px);
+  max-height: 84vh;
   overflow: auto;
   padding: var(--devin-space-3);
   border: 1px solid var(--devin-border);
@@ -285,9 +285,9 @@
 
 .devin-current {
   display: grid;
-  gap: var(--devin-space-2);
-  margin-bottom: var(--devin-space-3);
-  padding: var(--devin-space-3);
+  gap: var(--devin-space-1);
+  margin-bottom: var(--devin-space-2);
+  padding: var(--devin-space-2);
   border: 1px solid var(--devin-border);
   border-radius: var(--devin-radius-md);
   background: var(--devin-current-bg);
@@ -314,6 +314,25 @@
   min-width: 0;
 }
 
+.devin-current-session {
+  overflow: hidden;
+  color: var(--devin-text-secondary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.devin-current-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--devin-space-1);
+}
+
+.devin-account-badge-current {
+  border-color: var(--devin-accent);
+  color: var(--devin-accent);
+}
+
 .devin-current-balance-pill {
   display: inline-flex;
   max-width: 100%;
@@ -337,10 +356,6 @@
 .devin-current-balance-pill.balance-positive {
   border-color: rgb(130 217 170 / 28%);
   background: rgb(29 91 62 / 24%);
-}
-
-.devin-current-actions {
-  display: flex;
 }
 
 .devin-current-actions button {
@@ -377,9 +392,10 @@
 }
 
 .devin-toggle-row {
-  display: grid;
-  gap: var(--devin-space-1);
-  margin: var(--devin-space-3) 0 var(--devin-space-2);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--devin-space-1) var(--devin-space-3);
+  margin: var(--devin-space-2) 0;
 }
 
 #devin-exporter-settings label.devin-toggle {
@@ -526,7 +542,7 @@
 }
 
 .devin-settings-section {
-  padding: var(--devin-space-3) 0;
+  padding: var(--devin-space-2) 0;
   border-top: 1px solid var(--devin-border-subtle);
 }
 
