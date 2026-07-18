@@ -262,7 +262,8 @@ function renderWorklog(events) {
       case "shell_process_completed":
       case "shell_process_completed_background": {
         const entry = event.process_id == null ? null : commandLines.get(String(event.process_id));
-        if (!entry) break;
+        if (!entry || entry.completed) break;
+        entry.completed = true;
         if (event.exit_code != null) entry.text += `  → 退出码 ${event.exit_code}`;
         const output = truncateOutput(event.output_trunc);
         if (output) entry.output = output;
